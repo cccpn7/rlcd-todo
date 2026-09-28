@@ -4,11 +4,13 @@
 
 - Read `docs/product-plan.md` before product changes and `docs/development.md` before building.
 - This is a personal desk task display for Waveshare ESP32-S3-RLCD-4.2: portrait 300×400, monochrome, normally USB powered.
-- Three categories: 今日重点, 零散事项, 待回收反馈. Each may span multiple display pages. Manual ordering expresses priority. Unfinished tasks carry over automatically without changing category or order.
+- Three categories: 今日重点, 今日杂项, 今日追踪. Each may span multiple display pages. Manual ordering expresses priority. Unfinished tasks carry over automatically without changing category or order.
 - The device only displays and pages through tasks. Editing and completion belong to the web interface.
 - First validate web entry → Mac service → device; later connect the external assistant (大圣) through the same service interface.
 - Do not add voice, focus timers, multiple users, public hosting, or automatic task extraction without an explicit scope change.
-- Current repository is planning and development scaffolding; the todo application has not been implemented. Official example compilation is not application completion.
+- Draft edits autosave; only explicit publication changes the screen. USB and BLE both belong to v1, USB takes priority after handshake. No Wi-Fi dependency.
+- Keep original text intact. Portrait body is 18px with 24px line height; long items continue across pages. No ellipsis, hierarchy, or automatic shrinking.
+- Mac owns the shared layout/font engine; firmware displays cached monochrome pages and overlays date/connection status. Official example compilation is not application completion.
 
 ## Collaboration and ownership
 
