@@ -10,6 +10,7 @@
 - Do not add voice, focus timers, multiple users, public hosting, or automatic task extraction without an explicit scope change.
 - Draft edits autosave; only explicit publication changes the screen. USB and BLE both belong to v1, USB takes priority after handshake. No Wi-Fi dependency.
 - Keep original text intact. Portrait body is 18px with 24px line height; long items continue across pages. No ellipsis, hierarchy, or automatic shrinking.
+- Rasterize text directly in monochrome at native resolution. The final physical display is rotated 180 degrees from the initial prototype, including overlays; logical previews stay upright.
 - Mac owns the shared layout/font engine; firmware displays cached monochrome pages and overlays date/connection status. Official example compilation is not application completion.
 
 ## Collaboration and ownership

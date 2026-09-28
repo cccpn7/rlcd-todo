@@ -94,7 +94,9 @@ def paginate(tasks):
 
 
 def page_image(page):
-    im = Image.new("L", (WIDTH, HEIGHT), 255)
+    # Rasterize directly in monochrome. Thresholding an antialiased small glyph
+    # changes stroke weights unevenly on this strictly black/white display.
+    im = Image.new("1", (WIDTH, HEIGHT), 255)
     d = ImageDraw.Draw(im)
     d.text(
         (12, 7),
@@ -102,7 +104,6 @@ def page_image(page):
         font=font(),
         fill=0,
         anchor="lt",
-        stroke_width=0.25,
     )
     d.line((12, 32, 287, 32), fill=0)
     d.line((12, 373, 287, 373), fill=0)
@@ -120,8 +121,7 @@ def page_image(page):
             d.text((x, y), line, font=font(), fill=0, anchor="lt")
             y += LINE
     d.text((12, 381), f"{page.index}/{page.count}", font=font(12), fill=0, anchor="lt")
-    # Deliberately no dithering: hardware is strictly black/white.
-    return im.point(lambda value: 255 if value >= 160 else 0, mode="1")
+    return im
 
 
 def flat_bits(im):

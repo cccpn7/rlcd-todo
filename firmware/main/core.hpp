@@ -11,6 +11,13 @@
 #endif
 namespace rtd {
 constexpr size_t Limit = 128 * 1024, Pixels = 300 * 400, Bytes = Pixels / 8;
+struct DisplayPoint {
+  uint16_t x, y;
+};
+// Logical pages stay upright; rotate the complete physical display at flush.
+inline DisplayPoint rotate180(uint16_t x, uint16_t y) {
+  return {uint16_t(299 - x), uint16_t(399 - y)};
+}
 inline uint16_t u16(const uint8_t *p) { return p[0] | (uint16_t(p[1]) << 8); }
 inline uint32_t u32(const uint8_t *p) {
   return u16(p) | (uint32_t(u16(p + 2)) << 16);

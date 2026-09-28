@@ -107,8 +107,10 @@ static void flush(lv_display_t *display, const lv_area_t *area,
                   uint8_t *color) {
   auto pixels = (uint16_t *)color;
   for (int y = area->y1; y <= area->y2; y++)
-    for (int x = area->x1; x <= area->x2; x++)
-      panel->RLCD_SetPixel(x, y, *pixels++ < 0x7fff ? 0 : 255);
+    for (int x = area->x1; x <= area->x2; x++) {
+      auto point = rtd::rotate180(x, y);
+      panel->RLCD_SetPixel(point.x, point.y, *pixels++ < 0x7fff ? 0 : 255);
+    }
   panel->RLCD_Display();
   lv_display_flush_ready(display);
 }
