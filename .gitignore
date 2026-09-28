@@ -1,0 +1,36 @@
+# Local configuration, personal records, and device data
+.env
+.env.*
+!.env.example
+/local/
+/logs/
+*.log
+*.sqlite
+*.sqlite3
+*.db
+*.db-shm
+*.db-wal
+*.sqlite*-shm
+*.sqlite*-wal
+
+# Downloaded sources and machine-specific validation checkout
+/vendor/
+/validation
+/docs/sources/
+
+# Generated builds and dependencies
+**/build/
+**/managed_components/
+**/sdkconfig
+**/sdkconfig.old
+**/node_modules/
+**/.venv/
+**/__pycache__/
+*.pyc
+*.bin
+*.elf
+*.map
+*.o
+.DS_Store
+.vscode/
+.idea/
