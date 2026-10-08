@@ -39,6 +39,7 @@
 - Preserve third-party license notices when introducing third-party code. No project license is selected yet.
 - Bootstrap is committed to `main`; subsequent features use short-lived branches and focused commits. Never force-push `main` or overwrite unrelated changes.
 - Review staged content before any public push. Configure missing author identity locally for this repository, not globally.
+- For firmware changes, implement and test first, then flash within the authorized scope, verify on the actual device and obtain the user's acceptance before committing and pushing to Git. Do not commit firmware changes before that confirmation.
 
 ## Documentation
 
