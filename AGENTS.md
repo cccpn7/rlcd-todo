@@ -6,6 +6,7 @@
 - This is a personal desk task display for Waveshare ESP32-S3-RLCD-4.2: portrait 300×400, monochrome, normally USB powered.
 - Three categories: 今日重点, 今日杂项, 今日追踪. Each may span multiple display pages. Manual ordering expresses priority. Unfinished tasks carry over automatically without changing category or order.
 - The device only displays and pages through tasks. Editing and completion belong to the web interface.
+- Auto-page through every category subpage at a 5-second dwell, including empty categories. Manual paging, home and successful publication restart the dwell; pairing pauses it. Use a nonblocking monotonic timer, never periodic retransmission.
 - First validate web entry → Mac service → device; later connect the external assistant (大圣) through the same service interface.
 - Do not add voice, focus timers, multiple users, public hosting, or automatic task extraction without an explicit scope change.
 - Draft edits autosave; only explicit publication changes the screen. USB and BLE both belong to v1, USB takes priority after handshake. No Wi-Fi dependency.

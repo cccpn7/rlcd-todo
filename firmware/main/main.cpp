@@ -1,3 +1,4 @@
+#include "auto_pager.hpp"
 #include "cJSON.h"
 #include "core.hpp"
 #include "display_bsp.h"
@@ -28,6 +29,7 @@ static QueueHandle_t inbox;
 static std::vector<uint8_t> active, incoming, display_data;
 static std::vector<rtd::Page> pages;
 static size_t page_index = 0, received = 0;
+static rtd::AutoPager auto_pager;
 static int active_slot = -1, transfer_transport = 0;
 static uint64_t version = 0, transfer_version = 0;
 static std::string transfer_hash, owner, device_id, device_name;
@@ -177,6 +179,7 @@ static void show() {
   lv_obj_invalidate(picture);
   status();
   lv_refr_now(nullptr);
+  auto_pager.shown(esp_timer_get_time());
 }
 static void init_display() {
   panel = new DisplayPort(12, 11, 5, 40, 41, 300, 400);
@@ -488,6 +491,10 @@ extern "C" void app_main() {
     bool changed = button(key, now);
     changed = button(boot, now) || changed;
     if (changed)
+      show();
+    else if (auto_pager.advance(page_index, pages.size(), now,
+                                pairing.load() != 0 || key.raw || key.down ||
+                                    boot.raw || boot.down))
       show();
     if (now - last_status > 500000) {
       status();

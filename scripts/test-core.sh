@@ -11,3 +11,5 @@ Path('local/test-snapshot.bin').write_bytes(payload)
 PY
 clang++ -std=c++17 -fsanitize=undefined,bounds -g tests/core_test.cpp -lz -o local/core-test
 local/core-test local/test-snapshot.bin
+clang++ -std=c++17 -fsanitize=undefined,bounds -g tests/auto_pager_test.cpp -o local/auto-pager-test
+local/auto-pager-test
