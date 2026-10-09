@@ -92,14 +92,14 @@ def test_long_text_preserves_every_character_and_bounds():
         im = page_image(p)
         assert len(flat_bits(im)) == 15000
         for number, continuation, lines, y, x in p.entries:
-            assert y + len(lines) * 24 <= 364
+            assert y + len(lines) * 32 <= 364
             assert all(font().getlength(line) <= 288 - x for line in lines)
 
 
 def test_whole_item_moves_next_page():
     tasks = [
         dict(id=str(i), text="测试" * n, category="focus", done=False, position=i)
-        for i, n in enumerate([50, 40])
+        for i, n in enumerate([30, 20])
     ]
     pages = [p for p in paginate(tasks) if p.category == "focus"]
     assert len(pages) == 2

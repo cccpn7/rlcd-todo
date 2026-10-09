@@ -14,11 +14,11 @@ from PIL import Image, ImageDraw, ImageFont
 FONT = Path(__file__).parent / "assets/SourceHanSansCN-Regular.otf"
 CATEGORIES = {"focus": "今日重点", "misc": "今日杂项", "follow": "今日追踪"}
 WIDTH, HEIGHT, LIMIT = 300, 400, 128 * 1024
-TOP, BOTTOM, LINE, GAP = 44, 364, 24, 6
+TOP, BOTTOM, LINE, GAP = 50, 364, 32, 6
 
 
 @lru_cache
-def font(size=18):
+def font(size=24):
     return ImageFont.truetype(str(FONT), size)
 
 
@@ -101,11 +101,11 @@ def page_image(page):
     d.text(
         (12, 7),
         CATEGORIES[page.category],
-        font=font(),
+        font=font(26),
         fill=0,
         anchor="lt",
     )
-    d.line((12, 32, 287, 32), fill=0)
+    d.line((12, 38, 287, 38), fill=0)
     d.line((12, 373, 287, 373), fill=0)
     if not page.entries:
         d.text((150, 194), "暂无事项", font=font(), fill=0, anchor="mt")
