@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="zh-CN">
+  <meta charset="utf-8" /><meta
+    name="viewport"
+    content="width=device-width,initial-scale=1"
+  /><title>桌面待办纸</title
+  ><link rel="stylesheet" href="/style.css" />
+  <body>
+    <header>
+      <div>
+        <span class="eyebrow">给今天，一张清单</span>
+        <h1>桌面待办纸<span id="date"></span></h1>
+      </div>
+      <div class="publish-area">
+        <span id="connection" class="connection">正在连接</span
+        ><span id="save-state">已保存</span
+        ><button id="publish" class="primary">更新屏幕 <span>↗</span></button>
+      </div>
+    </header>
+    <div id="notice" role="status" aria-live="polite" hidden></div>
+    <main>
+      <section class="editor">
+        <div class="editor-intro">
+          <span>今天要做的，放在这里。</span
+          ><small>修改自动保存，准备好后再更新屏幕</small>
+        </div>
+        <div id="lists"></div>
+        <details id="completed">
+          <summary>已完成 <span id="completed-count">0</span></summary>
+          <div id="completed-list"></div>
+        </details>
+        <footer>未完成事项会留到明天。按你的节奏，一件一件来。</footer>
+      </section>
+      <aside>
+        <div class="preview-heading">
+          <h2>屏幕预览</h2>
+          <span>300 × 400</span>
+        </div>
+        <div class="segmented">
+          <button data-mode="draft" class="selected">草稿预览</button
+          ><button data-mode="published">已发布内容</button>
+        </div>
+        <nav id="categories" aria-label="预览分类"></nav>
+        <div class="device">
+          <div class="screen">
+            <img id="preview" alt="待办屏幕预览" /><span
+              id="preview-date"
+            ></span
+            ><span id="preview-status"></span>
+          </div>
+        </div>
+        <div class="pagination">
+          <button id="prev" aria-label="上一页">←</button
+          ><span id="page-index">1 / 1</span
+          ><button id="next" aria-label="下一页">→</button>
+        </div>
+        <p id="preview-note">这是草稿，点击“更新屏幕”后才会发送。</p>
+        <div class="device-status">
+          <span id="device-phase">等待设备连接</span
+          ><small id="last-published">尚未发布</small>
+        </div>
+        <p id="connection-help" role="status" hidden></p>
+        <p class="key-hint">
+          每页自动展示 5 秒，循环播放<br />KEY 下一页 · BOOT 上一页 · 长按 KEY 回重点
+        </p>
+      </aside>
+    </main>
+    <dialog id="bulk-dialog">
+      <form method="dialog">
+        <h2>批量添加</h2>
+        <p>一行一条事项，保留你写下的原文。</p>
+        <textarea id="bulk-text" rows="8" aria-label="批量事项内容"></textarea>
+        <div class="dialog-actions">
+          <button value="cancel">取消</button
+          ><button id="bulk-submit" type="button" class="primary">
+            添加到清单
+          </button>
+        </div>
+      </form>
+    </dialog>
+    <script src="/app.js"></script>
+  </body>
+</html>
