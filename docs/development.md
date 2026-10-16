@@ -86,3 +86,11 @@ local/venv/bin/python scripts/demo-push.py '回收演示反馈并确认结果' -
 ## 官方示例
 
 上游 [Waveshare 官方仓库](https://github.com/waveshareteam/ESP32-S3-RLCD-4.2)，固定提交 `eb1f63427d735a22b9c30e22fa63ebddae1834d3`，示例 `02_Example/ESP-IDF/09_LVGL_V9_Test`。将副本放在英文路径，固定 `main/idf_component.yml` 的 LVGL 为 9.4.0，配置 `RLCD_EXAMPLE_DIR` 后仍可运行 `./scripts/build-example.sh`。官方下载目录与缓存不提交。
+
+## 网页保存成功，但屏幕没有更新
+
+先看网页连接状态和“屏幕已更新”确认。草稿保存、发布到 Mac、设备显示确认是不同步骤；离线时发布内容留在 Mac 等待发送。设备有 USB 数据连接时优先通过 USB 恢复，蓝牙需要系统已开启并授权。
+
+如果网页正常但同步长期停留在旧连接状态，可运行 `./scripts/service.sh stop` 后再 `./scripts/service.sh start` 重启服务。最近已发布内容会自动补发，不需要删除数据库、重新建立清单或重烧固件。原始错误记录在本机 `local/service.log`，不要提交或直接公开。
+
+通信请求对写入和读取整体计时，BLE 建连及断开清理也有等待上限；失败后退出本次连接并重试，避免旧蓝牙调用一直等待而阻塞 USB 接管。

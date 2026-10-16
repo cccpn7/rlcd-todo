@@ -106,3 +106,115 @@ def test_manager_prefers_usb_and_only_sends_published(tmp_path):
         assert device.closed
 
     asyncio.run(run())
+
+
+@pytest.mark.parametrize("operation", ["read", "write"])
+def test_stalled_io_obeys_request_timeout(operation):
+    class Stalled(FakeLink):
+        async def write(self, data):
+            if operation == "write":
+                await asyncio.Event().wait()
+            await super().write(data)
+
+        async def read(self):
+            if operation == "read":
+                await asyncio.Event().wait()
+            return await super().read()
+
+    async def run():
+        with pytest.raises(TimeoutError, match="设备未确认"):
+            await asyncio.wait_for(Stalled().request("hello", timeout=0.02), timeout=0.5)
+
+    asyncio.run(run())
+
+
+def test_stale_ble_cleanup_does_not_block_usb_recovery(tmp_path):
+    from server.store import Store
+    from server.transport import BLELink, DeviceManager
+
+    store = Store(tmp_path / "tasks.sqlite3")
+    store.put("需要同步的内容", "focus")
+    store.publish()
+    pub = store.published()
+
+    async def run():
+        manager = DeviceManager(store)
+        cleanup_started = asyncio.Event()
+
+        class StaleClient:
+            async def disconnect(self):
+                cleanup_started.set()
+                await asyncio.Event().wait()
+
+        class WorkingUSB:
+            name = "USB"
+            closed = False
+
+            async def request(self, *args, **kwargs):
+                return {"version": 0}
+
+            async def send_snapshot(self, snapshot):
+                assert snapshot["payload"] == pub["payload"]
+                return {"version": snapshot["version"]}
+
+            async def close(self):
+                self.closed = True
+
+        manager.link = BLELink(StaleClient())
+        manager.link.disconnect_timeout = 0.02
+        usb = WorkingUSB()
+
+        async def found_usb():
+            return usb, {"version": 0}
+
+        manager.usb = found_usb
+        task = asyncio.create_task(manager.run())
+        try:
+            async with asyncio.timeout(1):
+                while manager.state["phase"] != "updated":
+                    await asyncio.sleep(0.005)
+            assert cleanup_started.is_set()
+            assert manager.state["connection"] == "USB"
+            assert manager.state["ack_version"] == pub["version"]
+        finally:
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+        assert usb.closed
+
+    asyncio.run(run())
+
+
+def test_ble_service_discovery_has_outer_deadline(tmp_path, monkeypatch):
+    import bleak
+
+    from server.store import Store
+    from server.transport import DeviceManager
+
+    store = Store(tmp_path / "tasks.sqlite3")
+    store.setting("binding", {"device": "test", "token": "test", "ble_name": "Todo-test"})
+
+    class StalledClient:
+        closed = False
+
+        async def connect(self):
+            await asyncio.Event().wait()
+
+        async def disconnect(self):
+            self.closed = True
+
+    async def found_device(*args, **kwargs):
+        return object()
+
+    client = StalledClient()
+    monkeypatch.setattr(bleak.BleakScanner, "find_device_by_filter", found_device)
+    monkeypatch.setattr(bleak, "BleakClient", lambda *args, **kwargs: client)
+
+    async def run():
+        manager = DeviceManager(store)
+        manager.ble_connect_timeout = 0.02
+        assert await asyncio.wait_for(manager.ble(), timeout=0.5) is None
+        assert client.closed
+        assert manager.state["phase"] == "waiting"
+
+    asyncio.run(run())

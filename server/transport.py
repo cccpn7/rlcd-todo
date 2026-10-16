@@ -30,22 +30,27 @@ class Link:
         self.sequence += 1
         message = {"id": self.sequence, "op": operation, "token": self.token, **fields}
         data = PREFIX + json.dumps(message, separators=(",", ":")).encode() + b"\n"
-        await self.write(data)
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
-            raw = await self.read()
-            if not raw.startswith(PREFIX):
-                continue
-            try:
-                reply = json.loads(raw[len(PREFIX) :])
-            except (ValueError, UnicodeError):
-                continue
-            if reply.get("id") != self.sequence:
-                continue
-            if not reply.get("ok"):
-                raise ProtocolError(reply.get("error", "通信失败"))
-            return reply
-        raise TimeoutError("设备未确认，请检查连接")
+        try:
+            # A deadline checked after read() cannot interrupt a stalled GATT call.
+            # Bound the entire exchange, including fragmented BLE writes.
+            async with asyncio.timeout(timeout):
+                await self.write(data)
+                while True:
+                    await asyncio.sleep(0)
+                    raw = await self.read()
+                    if not raw.startswith(PREFIX):
+                        continue
+                    try:
+                        reply = json.loads(raw[len(PREFIX) :])
+                    except (ValueError, UnicodeError):
+                        continue
+                    if reply.get("id") != self.sequence:
+                        continue
+                    if not reply.get("ok"):
+                        raise ProtocolError(reply.get("error", "通信失败"))
+                    return reply
+        except TimeoutError as exc:
+            raise TimeoutError("设备未确认，请检查连接") from exc
 
     async def send_snapshot(self, published):
         payload = published["payload"]
@@ -92,6 +97,7 @@ class USBLink(Link):
 
 class BLELink(Link):
     name = "BLE"
+    disconnect_timeout = 5
 
     def __init__(self, client):
         self.sequence = secrets.randbelow(1 << 30)
@@ -108,10 +114,16 @@ class BLELink(Link):
         return bytes(await self.client.read_gatt_char(TX, use_cached=False))
 
     async def close(self):
-        await self.client.disconnect()
+        try:
+            await asyncio.wait_for(self.client.disconnect(), timeout=self.disconnect_timeout)
+        except Exception:
+            # Cleanup must not prevent the manager from taking over a working USB link.
+            logging.getLogger(__name__).warning("BLE disconnect failed", exc_info=True)
 
 
 class DeviceManager:
+    ble_connect_timeout = 60
+
     def __init__(self, store):
         self.store = store
         self.link = None
@@ -176,7 +188,7 @@ class DeviceManager:
                 return None
             self.state.update(phase="pairing", error=None)
             client = BleakClient(device, timeout=60)
-            await client.connect()
+            await asyncio.wait_for(client.connect(), timeout=self.ble_connect_timeout)
             # Access to the authenticated characteristic triggers macOS pairing.
             await asyncio.wait_for(client.read_gatt_char(TX), timeout=90)
             link = BLELink(client)
@@ -185,10 +197,14 @@ class DeviceManager:
             if info.get("device") != binding["device"]:
                 raise ProtocolError("蓝牙设备不匹配")
             return link, info
+        except asyncio.CancelledError:
+            if client:
+                await BLELink(client).close()
+            raise
         except Exception:
             logging.getLogger(__name__).exception("BLE connection failed")
-            if client and client.is_connected:
-                await client.disconnect()
+            if client:
+                await BLELink(client).close()
             self.state.update(
                 phase="waiting",
                 error="蓝牙连接失败；请检查 Mac 蓝牙开关、权限、配对和设备电源。",
