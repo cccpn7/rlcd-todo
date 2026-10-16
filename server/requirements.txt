@@ -1,0 +1,6 @@
+fastapi==0.135.1
+uvicorn==0.42.0
+pillow==12.1.1
+fonttools==4.62.1
+pyserial==3.5
+bleak==3.0.2

@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 510" role="img" aria-label="亚克力滑槽限位剖面示意">
+<rect width="900" height="510" fill="#f6f8f7"/>
+<style>text{font-family:-apple-system,'PingFang SC',sans-serif;fill:#243336;font-size:18px}.small{font-size:14px;fill:#63736e}.line{fill:none;stroke:#5b716a;stroke-width:1.5}</style>
+<text x="32" y="32" font-size="23">限位靠亚克力，玻璃不受夹紧力</text>
+<rect x="120" y="60" width="160" height="32" rx="2" fill="#35484c"/>
+<rect x="284" y="98" width="366" height="28" fill="#687879"/>
+<rect x="580" y="126" width="20" height="192" fill="#afb8b4"/>
+<rect x="284" y="318" width="366" height="60" fill="#bd9d69"/>
+<rect x="120" y="404" width="570" height="32" fill="#398f84"/>
+<polygon points="260,404 280,404 280,314 296,314 280,298 260,298" fill="#398f84"/>
+<rect x="520" y="379" width="90" height="25" fill="#398f84"/>
+<path class="line" d="M165 62 L165 49 L337 49"/><text x="346" y="55">前框：完整露出玻璃</text>
+<path class="line" d="M652 111 L699 111"/><text x="711" y="117">屏幕玻璃</text>
+<text class="small" x="332" y="158">位于前框后约 1.70–1.95 mm</text>
+<path class="line" d="M600 219 L699 219"/><text x="711" y="225">原连接柱</text>
+<path class="line" d="M654 347 L699 347"/><text x="711" y="353">3 mm 亚克力</text>
+<path class="line" d="M263 310 L198 267 L38 267"/><text x="38" y="253">滑槽钩边：限制向前移动</text>
+<path class="line" d="M553 392 L468 460 L303 460"/><text x="303" y="485">后盖承托：限制向后移动</text>
+<text x="127" y="429" fill="white">后盖</text>
+<text class="small" x="34" y="188">亚克力沿槽侧向滑入</text>
+<text class="small" x="34" y="211">合壳后，前壳挡住退出方向</text>
+<text class="small" x="33" y="491">剖面原理示意；横向缩略，省略电路板及线材。</text>
+</svg>
