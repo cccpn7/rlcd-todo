@@ -146,7 +146,8 @@ class DeviceManager:
                 binding = self.store.setting("binding")
                 if binding:
                     link.token = binding["token"]
-                info = await link.request("hello", timeout=1.5, epoch=int(time.time()))
+                # Native font/cache startup can exceed the old 1.5-second probe.
+                info = await link.request("hello", timeout=5, epoch=int(time.time()))
                 if info.get("protocol") != 1:
                     raise ProtocolError("固件版本不兼容")
                 if binding and info["device"] != binding["device"]:

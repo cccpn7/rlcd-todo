@@ -12,9 +12,11 @@
 #include "lvgl.h"
 #include "mbedtls/base64.h"
 #include "mbedtls/sha256.h"
+#include "network.hpp"
 #include "nvs.h"
 #include "nvs_flash.h"
 #include "src/misc/cache/instance/lv_image_cache.h"
+#include "text_layout.hpp"
 #include "welcome.hpp"
 #include <algorithm>
 #include <atomic>
@@ -28,6 +30,14 @@ struct Message {
 static QueueHandle_t inbox;
 static std::vector<uint8_t> active, incoming, display_data;
 static std::vector<rtd::Page> pages;
+static rtd::Font font;
+static rtd::TextDocument text_document;
+static bool text_mode = false;
+static esp_partition_mmap_handle_t font_mapping;
+static uint8_t *screen_bits;
+static size_t page_count() {
+  return text_mode ? text_document.pages.size() : pages.size();
+}
 static size_t page_index = 0, received = 0;
 static rtd::AutoPager auto_pager;
 static int active_slot = -1, transfer_transport = 0;
@@ -37,10 +47,12 @@ static int64_t last_usb = 0, last_ble = 0, last_chunk = 0;
 static std::atomic<uint32_t> pairing{0};
 static std::atomic<int64_t> pairing_since{0};
 static DisplayPort *panel;
-static lv_obj_t *picture, *date_label, *status_label, *pair_label;
-static lv_image_dsc_t bitmap = {};
+static lv_obj_t *picture, *date_label, *status_label, *pair_label,
+    *network_label;
+static lv_image_dsc_t bitmap = {}, network_bitmap = {};
+static uint16_t network_pixels[40 * 16];
 static uint16_t *raster;
-static uint8_t bits[rtd::Bytes];
+static uint8_t *bits;
 static nvs_handle_t settings;
 static unsigned long key_long_count = 0;
 
@@ -111,7 +123,13 @@ static void flush(lv_display_t *display, const lv_area_t *area,
   for (int y = area->y1; y <= area->y2; y++)
     for (int x = area->x1; x <= area->x2; x++) {
       auto point = rtd::rotate180(x, y);
-      panel->RLCD_SetPixel(point.x, point.y, *pixels++ < 0x7fff ? 0 : 255);
+      bool white = *pixels++ >= 0x7fff;
+      auto index = y * 300 + x;
+      if (white)
+        screen_bits[index / 8] |= 0x80 >> (index % 8);
+      else
+        screen_bits[index / 8] &= ~(0x80 >> (index % 8));
+      panel->RLCD_SetPixel(point.x, point.y, white ? 255 : 0);
     }
   panel->RLCD_Display();
   lv_display_flush_ready(display);
@@ -128,6 +146,70 @@ static lv_obj_t *label(int x, int y, int width) {
   lv_obj_set_style_pad_all(l, 0, 0);
   return l;
 }
+static void update_network_icons() {
+  static int previous = -1;
+  int w = network_wifi(), h = network_http(), state = w * 4 + h;
+  if (state == previous)
+    return;
+  previous = state;
+  std::fill(network_pixels, network_pixels + 40 * 16, 0xffff);
+  auto pixel = [](int x, int y) {
+    if (x >= 0 && x < 40 && y >= 0 && y < 16)
+      network_pixels[y * 40 + x] = 0;
+  };
+  // Wi-Fi fan; hollow centre while associating, diagonal slash when
+  // disconnected.
+  for (int y = 1; y < 13; y++)
+    for (int x = 1; x < 15; x++) {
+      int d = (x - 8) * (x - 8) + (y - 13) * (y - 13);
+      if (y < 10 && ((d >= 105 && d <= 130) || (d >= 45 && d <= 62)))
+        pixel(x, y);
+    }
+  if (w == 2) {
+    for (int y = 11; y < 14; y++)
+      for (int x = 7; x < 10; x++)
+        pixel(x, y);
+  } else if (w == 1) {
+    pixel(8, 10);
+    pixel(7, 11);
+    pixel(9, 11);
+    pixel(8, 12);
+  } else
+    for (int i = 1; i < 15; i++) {
+      pixel(i, 15 - i);
+      pixel(i, 14 - i);
+    }
+  // HTTP: unknown dash, connected rings, broken rings, or configuration
+  // warning.
+  if (h == 0) {
+    for (int x = 27; x < 36; x++)
+      pixel(x, 8);
+  } else if (h == 3) {
+    for (int y = 2; y < 10; y++) {
+      pixel(31, y);
+      pixel(32, y);
+    }
+    pixel(31, 12);
+    pixel(32, 12);
+  } else {
+    for (int y = 4; y <= 11; y++)
+      for (int x = 23; x <= 39; x++) {
+        bool edge = (x <= 31 && (x == 23 || x == 31 || y == 4 || y == 11)) ||
+                    (x >= 30 && (x == 30 || x == 39 || y == 4 || y == 11));
+        if (edge && (h == 1 || x < 29 || x > 33))
+          pixel(x, y);
+      }
+    if (h == 1)
+      for (int x = 28; x <= 34; x++)
+        pixel(x, 8);
+    else {
+      pixel(30, 2);
+      pixel(33, 13);
+    }
+  }
+  lv_image_cache_drop(&network_bitmap);
+  lv_obj_invalidate(network_label);
+}
 static void status() {
   time_t now = time(nullptr);
   tm local;
@@ -138,8 +220,11 @@ static void status() {
   else
     strcpy(text, "--.--");
   lv_label_set_text(date_label, text);
+  update_network_icons();
   int64_t monotonic = esp_timer_get_time();
-  const char *link = (last_usb && monotonic - last_usb < 6000000)   ? "USB"
+  const char *link = network_enabled() && network_wifi() == 2
+                         ? (network_http() == 1 ? "NET" : "WAIT")
+                     : (last_usb && monotonic - last_usb < 6000000) ? "USB"
                      : (last_ble && monotonic - last_ble < 6000000) ? "BLE"
                                                                     : "OFF";
   if (active.size()) {
@@ -164,7 +249,9 @@ static void status() {
     lv_obj_add_flag(pair_label, LV_OBJ_FLAG_HIDDEN);
 }
 static void show() {
-  if (active.size() && !pages.empty()) {
+  if (text_mode) {
+    rtd::render(text_document.pages[page_index], font, bits);
+  } else if (active.size() && !pages.empty()) {
     auto p = pages[page_index];
     if (display_data[3] == '0')
       memcpy(bits, display_data.data() + p.offset, rtd::Bytes);
@@ -207,7 +294,17 @@ static void init_display() {
   picture = lv_image_create(lv_screen_active());
   lv_image_set_src(picture, &bitmap);
   lv_obj_set_pos(picture, 0, 0);
-  date_label = label(204, 9, 84);
+  date_label = label(166, 12, 48);
+  network_bitmap.header.magic = LV_IMAGE_HEADER_MAGIC;
+  network_bitmap.header.cf = LV_COLOR_FORMAT_RGB565;
+  network_bitmap.header.w = 40;
+  network_bitmap.header.h = 16;
+  network_bitmap.header.stride = 80;
+  network_bitmap.data_size = sizeof(network_pixels);
+  network_bitmap.data = (uint8_t *)network_pixels;
+  network_label = lv_image_create(lv_screen_active());
+  lv_image_set_src(network_label, &network_bitmap);
+  lv_obj_set_pos(network_label, 248, 10);
   lv_obj_set_style_text_align(date_label, LV_TEXT_ALIGN_RIGHT, 0);
   status_label = label(174, 380, 114);
   lv_obj_set_style_text_align(status_label, LV_TEXT_ALIGN_RIGHT, 0);
@@ -216,6 +313,60 @@ static void init_display() {
   lv_obj_set_style_text_align(pair_label, LV_TEXT_ALIGN_CENTER, 0);
   lv_obj_set_style_pad_all(pair_label, 12, 0);
   lv_obj_add_flag(pair_label, LV_OBJ_FLAG_HIDDEN);
+}
+static bool decode_snapshot(const std::vector<uint8_t> &wire,
+                            rtd::TextDocument &doc,
+                            std::vector<uint8_t> &decoded,
+                            std::vector<rtd::Page> &parsed,
+                            std::string &error) {
+  if (wire.size() >= 24 && memcmp(wire.data(), "RTD4", 4) == 0) {
+    if (!rtd::parse_text(wire.data(), wire.size(), doc, error) ||
+        !rtd::layout(doc, font, error))
+      return false;
+    std::vector<uint8_t> check(rtd::Bytes);
+    for (auto &p : doc.pages)
+      if (!rtd::render(p, font, check.data())) {
+        error = "Text outside display bounds";
+        return false;
+      }
+    return true;
+  }
+  if (!rtd::expand(wire.data(), wire.size(), decoded) ||
+      !rtd::parse(decoded.data(), decoded.size(), parsed)) {
+    error = "Invalid snapshot";
+    return false;
+  }
+  return true;
+}
+static std::string accept_snapshot(uint64_t next_version,
+                                   const std::string &sha) {
+  if (incoming.size() < 24 || incoming.size() > rtd::Limit ||
+      digest(incoming.data(), incoming.size()) != sha ||
+      rtd::u64(incoming.data() + 4) != next_version)
+    return "Snapshot verification failed";
+  if (next_version < version)
+    return "Older version";
+  if (next_version == version)
+    return incoming == active ? "" : "Conflicting version";
+  if (text_mode && memcmp(incoming.data(), "RTD4", 4))
+    return "Legacy image disabled after text migration";
+  std::vector<uint8_t> decoded;
+  std::vector<rtd::Page> parsed;
+  rtd::TextDocument doc;
+  std::string error;
+  if (!decode_snapshot(incoming, doc, decoded, parsed, error))
+    return error;
+  if (!save_snapshot())
+    return "Cache write failed";
+  active.swap(incoming);
+  display_data.swap(decoded);
+  pages.swap(parsed);
+  text_document = std::move(doc);
+  text_mode = active[3] == '4';
+  version = next_version;
+  page_index = 0;
+  show(); // SPI refresh completes before acknowledgement.
+  return "";
 }
 void receive_bytes(int transport, const uint8_t *data, size_t size) {
   static char buffers[2][4096];
@@ -287,6 +438,13 @@ static std::string handle(cJSON *request, int transport, cJSON *reply) {
     cJSON_AddNumberToObject(reply, "version", version);
     if (authorized) {
       cJSON_AddNumberToObject(reply, "page", page_index);
+      cJSON_AddNumberToObject(reply, "uptime_ms", esp_timer_get_time() / 1000);
+      cJSON_AddNumberToObject(reply, "pages", page_count());
+      cJSON_AddNumberToObject(reply, "wifi", network_wifi());
+      cJSON_AddNumberToObject(reply, "http", network_http());
+      cJSON_AddBoolToObject(reply, "text_mode", text_mode);
+      cJSON_AddNumberToObject(reply, "heap_internal",
+                              heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
       cJSON_AddNumberToObject(reply, "key", gpio_get_level(GPIO_NUM_18));
       cJSON_AddNumberToObject(reply, "boot", gpio_get_level(GPIO_NUM_0));
       cJSON_AddNumberToObject(reply, "long_presses", key_long_count);
@@ -313,6 +471,9 @@ static std::string handle(cJSON *request, int transport, cJSON *reply) {
     last_usb = now;
   else
     last_ble = now;
+  if (op == "network" && transport == 1) {
+    return network_configure(string(request, "config"));
+  }
   if (op == "begin") {
     uint64_t v = number(request, "version");
     size_t size = number(request, "size");
@@ -348,35 +509,14 @@ static std::string handle(cJSON *request, int transport, cJSON *reply) {
     return "";
   }
   if (op == "end") {
-    std::vector<rtd::Page> next;
-    std::vector<uint8_t> decoded;
-    if (received != incoming.size() ||
-        digest(incoming.data(), incoming.size()) != transfer_hash ||
-        !rtd::expand(incoming.data(), incoming.size(), decoded) ||
-        !rtd::parse(decoded.data(), decoded.size(), next) ||
-        rtd::u64(incoming.data() + 4) != transfer_version) {
+    if (received != incoming.size()) {
       reset_transfer();
-      return "Snapshot verification failed";
+      return "Incomplete snapshot";
     }
-    if (transfer_version == version) {
-      bool same = incoming == active;
-      reset_transfer();
-      if (!same)
-        return "Conflicting version";
-      cJSON_AddNumberToObject(reply, "version", version);
-      return "";
-    }
-    if (!save_snapshot()) {
-      reset_transfer();
-      return "Cache write failed";
-    }
-    active.swap(incoming);
-    display_data.swap(decoded);
-    pages = std::move(next);
-    version = transfer_version;
-    page_index = 0;
+    auto error = accept_snapshot(transfer_version, transfer_hash);
     reset_transfer();
-    show(); // synchronous SPI transfer completes before the acknowledgement.
+    if (!error.empty())
+      return error;
     cJSON_AddNumberToObject(reply, "version", version);
     return "";
   }
@@ -422,9 +562,9 @@ static bool button(Button &b, int64_t now) {
     if (b.down) {
       b.pressed = now;
       b.held = false;
-    } else if (!b.held && !pages.empty()) {
+    } else if (!b.held && page_count()) {
       page_index =
-          (page_index + pages.size() + (b.gpio == 18 ? 1 : -1)) % pages.size();
+          (page_index + page_count() + (b.gpio == 18 ? 1 : -1)) % page_count();
       return true;
     }
   }
@@ -437,6 +577,9 @@ static bool button(Button &b, int64_t now) {
   return false;
 }
 extern "C" void app_main() {
+  screen_bits = (uint8_t *)heap_caps_malloc(rtd::Bytes, MALLOC_CAP_SPIRAM);
+  bits = (uint8_t *)heap_caps_malloc(rtd::Bytes, MALLOC_CAP_SPIRAM);
+  assert(screen_bits && bits);
   ESP_ERROR_CHECK(nvs_flash_init());
   ESP_ERROR_CHECK(nvs_open("rlcd", NVS_READWRITE, &settings));
   char token[33];
@@ -452,17 +595,26 @@ extern "C" void app_main() {
   rtc_init();
   setenv("TZ", "CST-8", 1);
   tzset();
+  auto fp = esp_partition_find_first(ESP_PARTITION_TYPE_DATA,
+                                     ESP_PARTITION_SUBTYPE_ANY, "fonts");
+  const void *font_data = nullptr;
+  if (fp && esp_partition_mmap(fp, 0, fp->size, ESP_PARTITION_MMAP_DATA,
+                               &font_data, &font_mapping) == ESP_OK)
+    font.open((const uint8_t *)font_data, fp->size);
   for (int slot = 0; slot < 2; slot++) {
     std::vector<uint8_t> wire, decoded;
     std::vector<rtd::Page> parsed;
+    rtd::TextDocument doc;
+    std::string error;
     if (load_slot(slot, wire) &&
-        rtd::expand(wire.data(), wire.size(), decoded) &&
-        rtd::parse(decoded.data(), decoded.size(), parsed) &&
+        decode_snapshot(wire, doc, decoded, parsed, error) &&
         rtd::u64(wire.data() + 4) > version) {
       version = rtd::u64(wire.data() + 4);
       active.swap(wire);
       display_data.swap(decoded);
       pages.swap(parsed);
+      text_document = std::move(doc);
+      text_mode = active[3] == '4';
       active_slot = slot;
     }
   }
@@ -481,18 +633,38 @@ extern "C" void app_main() {
   ESP_ERROR_CHECK(usb_serial_jtag_driver_install(&usb));
   xTaskCreate(usb_reader, "usb_rx", 4096, nullptr, 4, nullptr);
   ble_init(device_name.c_str());
+  network_start();
   Button key{18}, boot{0};
   int64_t last_status = 0;
   for (;;) {
     Message msg;
     if (xQueueReceive(inbox, &msg, pdMS_TO_TICKS(10)))
       process(msg);
+    if (auto epoch = network_time())
+      rtc_sync(epoch);
+    if (auto job = network_pending()) {
+      if (job->kind == NetworkJob::Apply) {
+        reset_transfer();
+        incoming = std::move(job->data);
+        job->error = accept_snapshot(job->version, job->sha);
+        reset_transfer();
+      } else {
+        job->version = version;
+        job->sha = active.empty() ? "" : digest(active.data(), active.size());
+        job->page = page_index;
+        if (job->kind == NetworkJob::Capture) {
+          lv_refr_now(nullptr);
+          job->data.assign(screen_bits, screen_bits + rtd::Bytes);
+        }
+      }
+      network_complete(job);
+    }
     int64_t now = esp_timer_get_time();
     bool changed = button(key, now);
     changed = button(boot, now) || changed;
     if (changed)
       show();
-    else if (auto_pager.advance(page_index, pages.size(), now,
+    else if (auto_pager.advance(page_index, page_count(), now,
                                 pairing.load() != 0 || key.raw || key.down ||
                                     boot.raw || boot.down))
       show();

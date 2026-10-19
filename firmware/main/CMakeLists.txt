@@ -1,1 +1,1 @@
-idf_component_register(SRCS "main.cpp" "ble.cpp" "rtc.cpp" INCLUDE_DIRS "." REQUIRES display driver esp_timer nvs_flash bt json mbedtls esp_partition esp_hw_support)
+idf_component_register(SRCS "main.cpp" "ble.cpp" "rtc.cpp" "network.cpp" INCLUDE_DIRS "." REQUIRES display driver esp_timer nvs_flash bt json mbedtls esp_partition esp_hw_support esp_wifi esp_event esp_netif esp_http_client esp-tls lwip)

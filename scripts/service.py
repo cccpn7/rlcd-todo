@@ -46,7 +46,7 @@ def main():
                 text=True,
                 env={**os.environ, "LC_ALL": "en_US.UTF-8"},
             ).stdout
-            if "uvicorn server.app:app" in command and str(ROOT) in command:
+            if any(name in command for name in ("uvicorn server.app:app", "uvicorn server.proxy_app:configured_app")) and str(ROOT) in command:
                 os.kill(pid, signal.SIGTERM)
                 for _ in range(40):
                     try:
@@ -64,7 +64,8 @@ def main():
                 sys.executable,
                 "-m",
                 "uvicorn",
-                "server.app:app",
+                "server.proxy_app:configured_app" if (LOCAL/"assistant-integration/web-config.json").exists() else "server.app:app",
+                *(["--factory"] if (LOCAL/"assistant-integration/web-config.json").exists() else []),
                 "--app-dir",
                 str(ROOT),
                 "--host",

@@ -7,12 +7,13 @@
 - Three categories: 今日重点, 今日杂项, 今日追踪. Each may span multiple display pages. Manual ordering expresses priority. Unfinished tasks carry over automatically without changing category or order.
 - The device only displays and pages through tasks. Editing and completion belong to the web interface.
 - Auto-page through every category subpage at a 5-second dwell, including empty categories. Manual paging, home and successful publication restart the dwell; pairing pauses it. Use a nonblocking monotonic timer, never periodic retransmission.
-- First validate web entry → Mac service → device; later connect the external assistant (大圣) through the same service interface.
+- The approved assistant phase uses a single isolated server, explicit proposal confirmation, Wi-Fi HTTPS long polling and device-side text layout. Follow `docs/assistant-integration-plan.md` and `docs/remote-development.md`.
 - Do not add voice, focus timers, multiple users, public hosting, or automatic task extraction without an explicit scope change.
-- Draft edits autosave; only explicit publication changes the screen. USB and BLE both belong to v1, USB takes priority after handshake. No Wi-Fi dependency.
+- Draft edits autosave; only explicit publication changes the screen. The deployed text mode uses Wi-Fi independently of Mac; USB/BLE remain maintenance/manual fallbacks and must not create independent publication versions.
 - Keep original text intact. Portrait heading is 26px; body is 24px with 32px line height; long items continue across pages. No ellipsis, hierarchy, or automatic shrinking.
 - Rasterize text directly in monochrome at native resolution. The final physical display is rotated 180 degrees from the initial prototype, including overlays; logical previews stay upright.
-- Mac owns the shared layout/font engine; firmware displays cached monochrome pages and overlays date/connection status. Official example compilation is not application completion.
+- Firmware owns native monochrome font layout and pagination in text mode; the isolated server owns canonical tasks and publications. Web shows text drafts and on-demand device screenshots. Official example compilation is not application completion.
+- Protect existing remote programs and OpenClaw: own directory, virtual environment, database and Supervisor program only. Never restart or upgrade unrelated services; back up and narrowly patch any authorized skill addition.
 
 ## Collaboration and ownership
 

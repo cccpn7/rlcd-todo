@@ -1,4 +1,46 @@
-# 架构与接口
+# 当前架构与接口
+
+```mermaid
+flowchart LR
+  Assistant[大圣 Skill] --> Confirm[候选与本人确认]
+  Confirm --> API[独立 HTTPS 服务]
+  Web[Mac 备用网页] --> Proxy[本机代理]
+  Proxy --> API
+  API --> DB[(唯一 SQLite 清单与发布)]
+  Device[设备长轮询] --> API
+  Device --> Layout[本地字库与分页]
+  Layout --> Screen[显示及双缓存]
+  Screen --> Ack[版本与摘要回执]
+  Ack --> API
+```
+
+Mac 不参与日常无线转发。热点提供网络，设备主动连接服务；网页与大圣共用同一份任务和发布版本。正文排版在设备完成，网页只显示文字草稿和按需获取的设备截图。
+
+## 当前模块与边界
+
+- `server/remote_store.py`：SQLite 草稿、不可变候选、发布快照、回执和通知台账。
+- `server/confirmation.py`：从受信本人会话的原始消息中核验完整确认编号、时间和身份；模型自行声明确认无效。
+- `server/remote_app.py`：三类凭据隔离、版本化任务接口、HTTPS 长轮询、快照与回执、按需截图。
+- `server/proxy_app.py`、`server/remote_web/`：仅本机入口，复用远端接口，不建立第二份数据库。
+- `firmware/main/text_layout.hpp`：RLF1 字库、RTD4 原文快照、完整性/容量检查和设备原生分页。
+- `firmware/main/network.cpp`：Wi-Fi、HTTPS 整体超时、退避恢复；通过队列交给显示线程，网络等待不阻塞轮播。
+- `skills/desktop-todo/`：读取 → 候选 → 本人确认 → 发布 → 查询设备回执；需要延迟反馈时登记一次结果通知。
+
+## 当前 API 与一致性
+
+完整接口见 [实施计划](assistant-integration-plan.md) 与运行服务的 `/docs`。网页使用 `POST /api/v1/draft`（base 修订号与增量 changes）和显式 `POST /api/v1/publish`；助手只能创建候选并通过可信确认接口发布，不能使用网页凭据绕过确认。
+
+设备 `GET /api/v1/device/updates` 等待最多25秒，有变化立即返回；下载完整文本快照、校验、保存并显示后提交回执。旧版本不会覆盖新版本，相同版本和摘要不重复刷新。正常204保持连接健康；错误时清理连接、退避并重新查询最新版本。设备在日期旁独立显示 Wi-Fi 和 HTTP 状态，服务端记录带采集时间，不能把陈旧状态当作实时画面。
+
+`GET /api/v1/publications/{version}` 返回 queued、updated、failed 或 superseded；`POST /api/v1/publications/{version}/watch` 登记一次结果通知，复用既有投递台账，结果不明不盲目重发。连接成功与内容显示成功分开记录。
+
+RTD4 使用小端头 `<4sQQHH>`（magic、版本、发布时间、事项数、布局版本），逐项 `<BHI>`（分类、编号字节数、原文 UTF-8 字节数）后接编号与原文。完整 SHA-256 由下载元数据和缓存头保存。限制128KiB、1024项、每项20KiB、128页；接受前逐页验证。RLF1 字库分区4MiB，按需映射读取，不整库占用内部内存。RTD0–3仅用于迁移前缓存兼容，首次文本同步后拒绝旧图片发布。
+
+USB/BLE 共用已有认证分块协议，仅用于维护及转发服务端同一已发布版本。`network` 配置操作限已绑定USB；不把热点或凭据编入固件。部署、恢复和私有文件布局见 [直连开发说明](remote-development.md)。
+
+---
+
+# 旧版 Mac 图片模式（回退参考）
 
 ```mermaid
 flowchart LR
