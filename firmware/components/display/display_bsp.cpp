@@ -1,3 +1,4 @@
+#include "mono_portrait.hpp"
 // Copyright 2026 Waveshare. Apache-2.0; see third_party/Waveshare-LICENSE.txt.
 // Modified: flat lookup indexes, bounds checks, synchronous SPI completion.
 #include <stdio.h>
@@ -194,6 +195,12 @@ void DisplayPort::RLCD_Init() {
 
 void DisplayPort::RLCD_ColorClear(uint8_t color) {
     memset(DispBuffer, color, DisplayLen);
+}
+
+void DisplayPort::RLCD_DisplayMonoPortrait180(const uint8_t *bits) {
+    assert(width_ == 300 && height_ == 400);
+    rlcd::pack_portrait180(bits, DispBuffer);
+    RLCD_Display();
 }
 
 void DisplayPort::RLCD_Display() {

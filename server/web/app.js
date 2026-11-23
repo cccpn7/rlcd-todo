@@ -237,7 +237,8 @@ async function refresh(lists) {
     waiting: "等待设备连接",
     pairing: "请完成蓝牙配对",
     sending: "正在更新屏幕…",
-    updated: "屏幕已更新",
+    updated: "已在待办模式展示",
+    synced: "已同步到设备，待查看",
     failed: "发送失败，将重试",
     ready: "设备已就绪",
   };

@@ -257,6 +257,8 @@ static void worker(void *) {
         std::string path = "/api/v1/device/updates?version=" +
                            std::to_string(current.version) +
                            "&digest=" + current.sha +
+                           "&mode=" + current.mode +
+                           "&displayed_version=" + std::to_string(current.displayed_version) +
                            "&rejected=" + std::to_string(rejected) +
                            "&wifi=" + std::to_string(wifi_state.load()) +
                            "&http=" + std::to_string(http_state.load()) +
@@ -295,6 +297,11 @@ static void worker(void *) {
           auto a = cJSON_CreateObject();
           cJSON_AddNumberToObject(a, "version", next);
           cJSON_AddStringToObject(a, "sha256", sha.c_str());
+          if (job.error.empty()) {
+            cJSON_AddNumberToObject(a, "saved_version", job.saved_version);
+            cJSON_AddNumberToObject(a, "displayed_version", job.displayed_version);
+            cJSON_AddStringToObject(a, "mode", job.mode.c_str());
+          }
           if (!job.error.empty()) {
             rejected = next;
             cJSON_AddStringToObject(a, "error", job.error.c_str());

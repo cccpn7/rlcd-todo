@@ -8,7 +8,8 @@ struct NetworkJob {
   enum Kind { State, Apply, Capture } kind;
   explicit NetworkJob(Kind value) : kind(value) {}
   std::vector<uint8_t> data;
-  uint64_t version = 0;
+  uint64_t version = 0, saved_version = 0, displayed_version = 0;
+  std::string mode;
   size_t page = 0;
   std::string sha, error;
   SemaphoreHandle_t done = nullptr;

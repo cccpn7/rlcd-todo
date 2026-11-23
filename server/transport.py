@@ -248,9 +248,14 @@ class DeviceManager:
                             self.state["phase"] = "sending"
                             ack = await self.link.send_snapshot(published)
                             self.state["ack_version"] = ack["version"]
+                            info = ack
                         elif published and info["version"] > published["version"]:
                             raise ProtocolError("设备版本更新，请检查本机数据库是否被回退")
-                        self.state["phase"] = "updated" if published else "ready"
+                        self.state.update({k: info[k] for k in ("saved_version", "displayed_version", "mode") if k in info})
+                        self.state["phase"] = (
+                            "synced" if published and info.get("mode") and info.get("displayed_version", 0) < published["version"]
+                            else "updated" if published else "ready"
+                        )
                     else:
                         self.state.update(connection=None, phase="waiting")
                 except asyncio.CancelledError:

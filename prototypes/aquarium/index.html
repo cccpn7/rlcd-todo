@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>桌面纸 · 小鱼缸原型</title>
+<link rel="stylesheet" href="style.css">
+<main>
+  <header><a class="brand" href="./">桌面纸 <span>／ 小鱼缸</span></a><span class="edition">交互试样 07</span></header>
+  <section class="layout">
+    <div class="intro">
+      <p class="eyebrow">给今天，一点小小的仪式。</p>
+      <h1>喂一口鱼，<br>看一会儿今天。</h1>
+      <p class="description">平时让三条小鱼陪着你。<br>鱼粮瓶靠近，小鱼吃饱，今天的事就出现。<br>三分钟后，把桌面还给鱼缸。</p>
+      <ol class="journey"><li id="stage-a" class="active"><span>01</span>看鱼游泳</li><li id="stage-b"><span>02</span>喂一口</li><li id="stage-c"><span>03</span>看看待办</li></ol>
+      <div class="control">
+        <button id="bottle" aria-pressed="false"><svg viewBox="0 0 36 44" aria-hidden="true"><path d="M12 3h12v7H12zM10 10h16v5h3v25H7V15h3z"/><path class="label" d="M10 20h16v13H10z"/><path d="M13 26h7l4-3v7l-4-3h-7z"/></svg><span id="bottle-label">靠近鱼粮瓶</span><span class="arrow">↗</span></button>
+        <p id="hint" aria-live="polite">点击模拟磁铁靠近，再点击拿开。</p>
+      </div>
+      <details><summary>原型演示工具</summary><p>只操作这张预览，不连接实际设备。正式使用等待 3 分钟；这里可跳到最后 5 秒检查回鱼缸。</p><div class="tools"><button id="last-five">跳至最后 5 秒</button><button id="reset">重新体验</button></div><div class="tools"><button id="prev">BOOT · 上一页</button><button id="next">KEY · 喂鱼</button><button id="home">KEY 长按 · 首页</button></div></details>
+    </div>
+    <div class="preview">
+      <div class="bottle-mark" id="bottle-mark"><span>鱼粮瓶靠近中</span><div class="drop-line"></div></div>
+      <div class="device"><div class="sensor"><span></span>感应区</div><canvas id="screen" width="300" height="400" role="img" aria-label="300乘400黑白鱼缸与待办交互原型"></canvas><div class="device-bottom"><span>DESK PAPER</span><i></i></div></div>
+      <div class="caption"><span id="mode-label">鱼缸 · 自由游动</span><span id="countdown">常驻</span></div>
+      <p class="preview-note">300 × 400 · 纯黑白 · 目标 12 帧／秒<br>网页示意，字号与反射屏实际观感以真屏为准。</p>
+    </div>
+  </section>
+  <footer><span>无需联网的喂鱼时刻。</span><span>本页使用通用示例，不读取真实待办。</span></footer>
+</main>
+<script type="module" src="app.mjs"></script>
+</html>

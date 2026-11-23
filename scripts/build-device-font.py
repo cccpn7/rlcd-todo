@@ -17,7 +17,7 @@ OUT = ROOT / "local/device-font"
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     cmap = TTFont(SOURCE).getBestCmap()
-    sets = {12: range(32, 127), 24: sorted(cmap), 26: sorted(map(ord, set("今日重点杂项追踪")))}
+    sets = {14: sorted(map(ord, "思闪点")), 12: range(32, 127), 24: sorted(cmap), 26: sorted(map(ord, set("今日重点杂项追踪")))}
     records, pixels = [], bytearray()
     for size, chars in sorted(sets.items()):
         font = ImageFont.truetype(str(SOURCE), size)

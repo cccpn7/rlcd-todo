@@ -54,3 +54,23 @@ Mac 私有网页配置包含 url、token（web 凭据）、ca（本机证书文�
 Skill 在三次短时状态查询后仍未显示时，可用 `todo.py watch VERSION` 注册结果通知。独立服务的持久化队列等待已显示、失败或被更新版本替代，再调用私有配置中的 workflow_script，复用现有双端投递台账。没有注册的发布不主动通知。发送结果不明确时保留 needs-review/sending 状态，检查既有台账后人工处理，不自动重发；此机制不新增 cron、不调整聊天网关。
 
 维护示例：`python scripts/maintain-device.py status`、`configure --network-config PRIVATE_JSON`、`push --transport usb` 或 `push --transport ble`。补发下载服务端已发布快照并验证摘要，不生成本地版本、不发布未确认草稿。
+
+## 鱼缸阶段的同步语义与霍尔校准
+
+新版回执保留 `version`（保存版本兼容字段），新增 `saved_version`、`displayed_version` 和 `mode`（aquarium/feeding/todo）。新版长轮询必须携带 `mode` 与 `displayed_version`，否则按旧固件“已显示”处理。`synced` 仅代表校验及双缓存保存完成；`updated` 代表历史上已在待办模式实际刷新该版本，不代表此刻仍在显示待办。设备重启默认鱼缸；展示版本存于NVS，仅首次展示新版本时写入。网络断开时本地互动不依赖回执成功。
+
+未安装或未校准 SS49E 时不启用感应触发，KEY 短按仍可喂鱼。接线须先核对实物 VCC/GND/OUT，采用3.3V、共地、GPIO1模拟输入和去耦／滤波。校准仅允许已绑定USB；不提供远程喂鱼或远程校准入口。
+
+**校准会话要求**：far 和 near 必须在同一个持续 USB 连接内执行；far 基准仅暂存在内存，near 成功后才一起写入NVS。本机实测重新打开串口可能重启设备，因此下面的独立命令仅用于不会重启的串口环境或单步诊断，不能在会重启的环境里依次执行来代替完整校准。现场采用持续连接，先发 `hall/far` 并等到 `far-ready`，移动磁铁后发 `hall/near` 并等到 `calibrated`。
+
+```bash
+# 磁铁移开、传感器已固定时，采集50个有效样本
+local/venv/bin/python scripts/maintain-device.py hall --hall-action far
+# 再把磁铁放在希望触发的位置，保持不动，采集靠近样本并保存
+local/venv/bin/python scripts/maintain-device.py hall --hall-action near
+local/venv/bin/python scripts/maintain-device.py hall
+```
+
+只有结果 `calibrated` 才生效。`insufficient-separation` 表示磁场变化相对噪声不足，应调整位置后重新采集；`sample-error` / `save-error` 须排查输入或存储。上电不会自动重算基准，ADC读数故障禁止触发。移开500ms重新允许、靠近150ms触发；仅喂食期间忽略动作；待办中新的靠近或 KEY 短按会重新喂鱼，吃完重新计时180秒。
+
+ADC使用 ESP-IDF 5.5.2 的 [oneshot 驱动](https://docs.espressif.com/projects/esp-idf/en/v5.5.2/esp32s3/api-reference/peripherals/adc_oneshot.html)，独立任务20ms采样，不在中断中调用；缓存写入等主任务停顿后重新观察完整释放与靠近过程。

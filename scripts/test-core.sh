@@ -13,3 +13,9 @@ clang++ -std=c++17 -fsanitize=undefined,bounds -g tests/core_test.cpp -lz -o loc
 local/core-test local/test-snapshot.bin
 clang++ -std=c++17 -fsanitize=undefined,bounds -g tests/auto_pager_test.cpp -o local/auto-pager-test
 local/auto-pager-test
+
+clang++ -std=c++17 -fsanitize=undefined,bounds -g tests/aquarium_test.cpp -o local/aquarium-test
+local/aquarium-test
+
+clang++ -std=c++17 -fsanitize=undefined,bounds -g tests/mono_portrait_test.cpp -o local/mono-portrait-test
+local/mono-portrait-test

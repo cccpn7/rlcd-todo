@@ -140,11 +140,10 @@ def create_remote_app(config, verifier=None):
             **seen,
             "online": time.time() - seen.get("at", 0) < 70,
             "ack_version": ack.get("version", 0),
-            "phase": "updated"
-            if pub and ack.get("version") == pub["version"]
-            else "failed"
-            if error
-            else "queued",
+            "saved_version": ack.get("saved_version", ack.get("version", 0)),
+            "displayed_version": ack.get("displayed_version", ack.get("version", 0)),
+            "mode": seen.get("mode") or ack.get("mode", "todo"),
+            "phase": store.publication_phase(pub["version"]) if pub else "queued",
             "error": error,
         }
         return s
@@ -215,15 +214,22 @@ def create_remote_app(config, verifier=None):
         wait: int = 25,
         wifi: int = 2,
         http: int = 1,
+        mode: str | None = None,
+        displayed_version: int | None = None,
     ):
         require(request, "device")
         if wait < 0 or wait > 25:
             raise ValueError("wait须在0到25秒之间")
-        store.metadata("device_seen", {"at": int(time.time()), "wifi": wifi, "http": http})
+        if mode is not None and mode not in ("aquarium", "feeding", "todo"):
+            raise ValueError("无效显示模式")
+        if mode is not None and (displayed_version is None or displayed_version < 0 or displayed_version > version):
+            raise ValueError("无效展示版本")
+        store.metadata("device_seen", {"at": int(time.time()), "wifi": wifi, "http": http, "mode": mode})
         if version and digest:
             pub = store.publication(version)
             if pub and pub["sha"] == digest:
-                store.ack(version, digest)
+                store.ack(version, digest, saved_version=version if mode else None,
+                          displayed_version=displayed_version, mode=mode)
         deadline = time.monotonic() + wait
         async with changed:
             while True:
@@ -270,7 +276,9 @@ def create_remote_app(config, verifier=None):
         require(request, "device")
         if len(str(data.get("error", ""))) > 512:
             raise ValueError("错误信息过长")
-        return store.ack(data.get("version"), data.get("sha256"), data.get("error"))
+        return store.ack(data.get("version"), data.get("sha256"), data.get("error"),
+                         saved_version=data.get("saved_version"),
+                         displayed_version=data.get("displayed_version"), mode=data.get("mode"))
 
     @app.post("/api/v1/device/capture")
     async def capture(request: Request):

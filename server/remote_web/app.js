@@ -260,12 +260,13 @@ async function refresh(lists) {
     waiting: "等待设备连接",
     pairing: "请完成蓝牙配对",
     sending: "正在更新屏幕…",
-    updated: "屏幕已更新",
+    updated: "已在待办模式展示",
+    synced: "已同步到设备，待查看",
     failed: "设备未能显示，请查看错误",
-    queued: "已发布，等待设备显示",
+    queued: "已发布，等待同步",
     ready: "设备已就绪",
   };
-  $("device-phase").textContent = label[d.phase] || d.phase;
+  $("device-phase").textContent = (label[d.phase] || d.phase) + (d.mode ? " · " + ({aquarium:"鱼缸",feeding:"喂食",todo:"待办"}[d.mode] || d.mode) : "");
   if (
     state.published &&
     d.ack_version !== state.published.version &&

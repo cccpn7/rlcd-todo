@@ -20,7 +20,8 @@ async def deliver_ready(store, config):
         folder = Path(config["database"]).parent / "notifications" / str(version)
         folder.mkdir(parents=True, exist_ok=True, mode=0o700)
         text = {
-            "updated": "桌面待办纸：你确认的清单已在设备保存并显示。",
+            "updated": "桌面待办纸：你确认的清单已在设备的待办模式展示过。",
+            "synced": "桌面待办纸：清单已同步到设备，待查看；喂鱼后会展示待办。",
             "failed": "桌面待办纸：设备未能显示这次清单，原内容已保留，请让大圣查看发布错误。",
             "superseded": "桌面待办纸：这次待显示清单已有更新版本，设备将以最新发布为准。",
         }[phase]

@@ -294,6 +294,8 @@ class RemoteStore:
             return "updated"
         if self.publication()["version"] > version:
             return "superseded"
+        if self.metadata("saved:" + str(version)):
+            return "synced"
         return "failed" if self.metadata("error:" + str(version)) else "queued"
 
     def watch(self, version):
@@ -335,30 +337,42 @@ class RemoteStore:
         with self.connect() as db:
             db.execute("UPDATE notifications SET status=? WHERE version=?", (status, version))
 
-    def ack(self, version, digest, error=None):
+    def ack(self, version, digest, error=None, *, saved_version=None, displayed_version=None, mode=None):
         pub = self.publication(version)
         if not pub or pub["sha"] != digest:
             raise ValueError("回执版本或摘要不匹配")
+        modern = mode is not None
+        if modern:
+            if mode not in ("aquarium", "feeding", "todo"):
+                raise ValueError("无效显示模式")
+            if type(saved_version) is not int or saved_version != version:
+                raise ValueError("保存版本不匹配")
+            if (type(displayed_version) is not int or displayed_version < 0
+                    or displayed_version > saved_version
+                    or (displayed_version and not self.publication(displayed_version))):
+                raise ValueError("无效展示版本")
+        elif saved_version is not None or displayed_version is not None:
+            raise ValueError("新版回执必须包含显示模式")
+        else:
+            saved_version = displayed_version = version
+        now = int(time.time())
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             row = db.execute("SELECT value FROM metadata WHERE key='device_ack'").fetchone()
             old = json.loads(row[0]) if row else {}
+            def put(key, value):
+                db.execute("INSERT OR REPLACE INTO metadata VALUES (?,?)", (key, encoded(value)))
             if error:
-                db.execute(
-                    "INSERT OR REPLACE INTO metadata VALUES (?,?)",
-                    ("error:" + str(version), encoded({"error": error, "at": int(time.time())})),
-                )
+                put("error:" + str(version), {"error": error, "at": now})
             else:
-                db.execute(
-                    "INSERT OR REPLACE INTO metadata VALUES (?,?)",
-                    ("displayed:" + str(version), encoded({"at": int(time.time())})),
-                )
-            if not error and version >= old.get("version", 0):
-                db.execute(
-                    "INSERT OR REPLACE INTO metadata VALUES (?,?)",
-                    (
-                        "device_ack",
-                        encoded({"version": version, "sha256": digest, "at": int(time.time())}),
-                    ),
-                )
+                put("saved:" + str(version), {"at": now})
+                db.execute("DELETE FROM metadata WHERE key=?", ("error:" + str(version),))
+                if displayed_version:
+                    put("displayed:" + str(displayed_version), {"at": now})
+                if version >= old.get("version", 0):
+                    put("device_ack", {
+                        "version": version, "saved_version": saved_version,
+                        "displayed_version": max(displayed_version, old.get("displayed_version", 0)),
+                        "mode": mode or "todo", "sha256": digest, "at": now,
+                    })
         return {"ok": True}

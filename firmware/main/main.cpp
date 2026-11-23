@@ -1,4 +1,6 @@
 #include "auto_pager.hpp"
+#include "aquarium_draw.hpp"
+#include "esp_adc/adc_oneshot.h"
 #include "cJSON.h"
 #include "core.hpp"
 #include "display_bsp.h"
@@ -55,6 +57,74 @@ static uint16_t *raster;
 static uint8_t *bits;
 static nvs_handle_t settings;
 static unsigned long key_long_count = 0;
+static tank::Aquarium aquarium;
+static tank::HallFilter hall;
+static adc_oneshot_unit_handle_t hall_adc = nullptr;
+static std::atomic<int> hall_raw{-1};
+static std::atomic<unsigned> hall_sequence{0};
+static uint64_t displayed_version = 0;
+static unsigned long aquarium_frames = 0;
+static int64_t frame_us=0,paint_us=0,transfer_us=0;
+static int hall_capture = 0, hall_count = 0, hall_sum = 0, hall_min = 4095, hall_max = 0;
+static int hall_far = 0, hall_far_noise = 0;
+static std::string hall_result = "not-calibrated";
+static void hall_reader(void *) {
+  for (;;) {
+    int value = -1;
+    if (hall_adc && adc_oneshot_read(hall_adc, ADC_CHANNEL_0, &value) != ESP_OK) value = -1;
+    hall_raw.store(value); hall_sequence.fetch_add(1);
+    vTaskDelay(pdMS_TO_TICKS(20));
+  }
+}
+static void hall_status(cJSON *reply) {
+  auto h = cJSON_AddObjectToObject(reply, "hall");
+  cJSON_AddBoolToObject(h, "calibrated", hall.calibrated);
+  cJSON_AddBoolToObject(h, "valid", hall.valid);
+  cJSON_AddBoolToObject(h, "near", hall.near);
+  cJSON_AddBoolToObject(h, "armed", aquarium.armed);
+  cJSON_AddNumberToObject(h, "max_gap_ms", aquarium.max_presence_gap);
+  cJSON_AddNumberToObject(h, "gap_resets", aquarium.presence_gaps);
+  cJSON_AddNumberToObject(h, "raw", hall.raw);
+  cJSON_AddNumberToObject(h, "filtered", hall.filtered);
+  cJSON_AddNumberToObject(h, "baseline", hall.baseline);
+  cJSON_AddNumberToObject(h, "trigger", hall.trigger);
+  cJSON_AddNumberToObject(h, "release", hall.release);
+  cJSON_AddNumberToObject(h, "samples", hall_count);
+  cJSON_AddStringToObject(h, "result", hall_result.c_str());
+}
+static void display_state(cJSON *reply) {
+  cJSON_AddNumberToObject(reply, "saved_version", version);
+  cJSON_AddNumberToObject(reply, "displayed_version", displayed_version);
+  cJSON_AddStringToObject(reply, "mode", aquarium.name());
+}
+static void hall_sample(int64_t now) {
+  static unsigned previous = 0;
+  auto sequence = hall_sequence.load();
+  if (sequence == previous) return;
+  previous = sequence;
+  int raw = hall_raw.load(); hall.sample(raw, raw >= 0);
+  if (hall_capture) {
+    if (!hall.valid) {hall_capture=0;hall_result="sample-error";return;}
+    hall_sum += raw; hall_min=std::min(hall_min,raw);hall_max=std::max(hall_max,raw);
+    if (++hall_count >= 50) {
+      int mean=hall_sum/hall_count,noise=hall_max-hall_min;
+      if (hall_capture==1) {hall_far=mean;hall_far_noise=noise;hall_result="far-ready";}
+      else {
+        int gap=std::abs(mean-hall_far);
+        if (!hall_far || gap < std::max(80,6*std::max(noise,hall_far_noise))) hall_result="insufficient-separation";
+        else {
+          int profile[3]={hall_far,int(gap*.55),int(gap*.25)};
+          if (nvs_set_blob(settings,"hall",profile,sizeof(profile))==ESP_OK && nvs_commit(settings)==ESP_OK) {
+            hall.configure(profile[0],profile[1],profile[2]);hall_result="calibrated";
+          } else hall_result="save-error";
+        }
+      }
+      hall_capture=0;
+    }
+    aquarium.presence(false,false,now/1000);
+  } else aquarium.presence(hall.near,hall.calibrated&&hall.valid,now/1000);
+}
+
 
 static std::string digest(const uint8_t *p, size_t n) {
   uint8_t d[32];
@@ -122,16 +192,14 @@ static void flush(lv_display_t *display, const lv_area_t *area,
   auto pixels = (uint16_t *)color;
   for (int y = area->y1; y <= area->y2; y++)
     for (int x = area->x1; x <= area->x2; x++) {
-      auto point = rtd::rotate180(x, y);
       bool white = *pixels++ >= 0x7fff;
       auto index = y * 300 + x;
       if (white)
         screen_bits[index / 8] |= 0x80 >> (index % 8);
       else
         screen_bits[index / 8] &= ~(0x80 >> (index % 8));
-      panel->RLCD_SetPixel(point.x, point.y, white ? 255 : 0);
     }
-  panel->RLCD_Display();
+  panel->RLCD_DisplayMonoPortrait180(screen_bits);
   lv_display_flush_ready(display);
 }
 static uint32_t ticks() { return esp_timer_get_time() / 1000; }
@@ -236,6 +304,8 @@ static void status() {
   } else
     snprintf(text, sizeof(text), "%s", link);
   lv_label_set_text(status_label, text);
+  if (aquarium.mode == tank::Aquarium::Todo) lv_obj_remove_flag(status_label, LV_OBJ_FLAG_HIDDEN);
+  else lv_obj_add_flag(status_label, LV_OBJ_FLAG_HIDDEN);
   uint32_t code = pairing.load();
   if (code && monotonic - pairing_since.load() > 90000000) {
     pairing = 0;
@@ -249,7 +319,24 @@ static void status() {
     lv_obj_add_flag(pair_label, LV_OBJ_FLAG_HIDDEN);
 }
 static void show() {
-  if (text_mode) {
+  if (aquarium.mode != tank::Aquarium::Todo) {
+    auto start=esp_timer_get_time();
+    tank::Painter painter(bits);painter.draw(aquarium,font);
+    time_t stamp=time(nullptr);tm clock;localtime_r(&stamp,&clock);char text[32];
+    if(stamp>1704067200)strftime(text,sizeof(text),"%m.%d",&clock);else strcpy(text,"--.--");
+    painter.ascii(font,text,178,10);
+    for(int y=0;y<16;y++)for(int x=0;x<40;x++)if(network_pixels[y*40+x]==0)painter.pixel(248+x,10+y);
+    if(auto code=pairing.load()){
+      painter.rect(50,155,200,85,false);painter.ascii(font,"BLE PIN",101,160,24);
+      snprintf(text,sizeof(text),"%06lu",(unsigned long)code);painter.ascii(font,text,108,196,24);
+    }
+    memcpy(screen_bits,bits,rtd::Bytes);
+    paint_us=esp_timer_get_time()-start;
+    auto transfer=esp_timer_get_time();panel->RLCD_DisplayMonoPortrait180(bits);
+    transfer_us=esp_timer_get_time()-transfer;frame_us=esp_timer_get_time()-start;
+    aquarium_frames++;
+    return;
+  } else if (text_mode) {
     rtd::render(text_document.pages[page_index], font, bits);
   } else if (active.size() && !pages.empty()) {
     auto p = pages[page_index];
@@ -258,15 +345,26 @@ static void show() {
     else
       rtd::unpack(display_data.data() + p.offset, p.size, bits,
                   display_data[3] == '2');
-  } else
-    rtd::unpack(welcome, sizeof(welcome), bits);
+  } else {
+    memset(bits,255,rtd::Bytes);
+    rtd::draw_text(bits,font,rtd::codes("暂无已同步待办"),66,180,24);
+  }
   for (size_t i = 0; i < rtd::Pixels; i++)
     raster[i] = (bits[i / 8] & (0x80 >> (i % 8))) ? 0xffff : 0;
   lv_image_cache_drop(&bitmap);
   lv_obj_invalidate(picture);
-  status();
+  if (aquarium.mode == tank::Aquarium::Todo) status();
+  else lv_obj_add_flag(status_label, LV_OBJ_FLAG_HIDDEN);
   lv_refr_now(nullptr);
-  auto_pager.shown(esp_timer_get_time());
+  if (aquarium.mode == tank::Aquarium::Todo) {
+    auto now=esp_timer_get_time();
+    auto_pager.shown(now);aquarium.shown(now/1000);
+    if (version>displayed_version) {
+      // Persist once per publication, never once per animation frame/page.
+      if(nvs_set_u64(settings,"displayed",version)==ESP_OK && nvs_commit(settings)==ESP_OK)
+        displayed_version=version;
+    }
+  }
 }
 static void init_display() {
   panel = new DisplayPort(12, 11, 5, 40, 41, 300, 400);
@@ -365,7 +463,7 @@ static std::string accept_snapshot(uint64_t next_version,
   text_mode = active[3] == '4';
   version = next_version;
   page_index = 0;
-  show(); // SPI refresh completes before acknowledgement.
+  if (aquarium.mode == tank::Aquarium::Todo) show(); // Idle/feeding only persist; never steal the picture.
   return "";
 }
 void receive_bytes(int transport, const uint8_t *data, size_t size) {
@@ -436,6 +534,7 @@ static std::string handle(cJSON *request, int transport, cJSON *reply) {
     cJSON_AddStringToObject(reply, "name", device_name.c_str());
     cJSON_AddBoolToObject(reply, "bound", !owner.empty());
     cJSON_AddNumberToObject(reply, "version", version);
+    display_state(reply);
     if (authorized) {
       cJSON_AddNumberToObject(reply, "page", page_index);
       cJSON_AddNumberToObject(reply, "uptime_ms", esp_timer_get_time() / 1000);
@@ -448,6 +547,12 @@ static std::string handle(cJSON *request, int transport, cJSON *reply) {
       cJSON_AddNumberToObject(reply, "key", gpio_get_level(GPIO_NUM_18));
       cJSON_AddNumberToObject(reply, "boot", gpio_get_level(GPIO_NUM_0));
       cJSON_AddNumberToObject(reply, "long_presses", key_long_count);
+      cJSON_AddNumberToObject(reply, "animation_frames", aquarium_frames);
+      cJSON_AddNumberToObject(reply, "frame_us", frame_us);
+      cJSON_AddNumberToObject(reply, "paint_us", paint_us);
+      cJSON_AddNumberToObject(reply, "transfer_us", transfer_us);
+      cJSON_AddNumberToObject(reply, "todo_remaining_ms", aquarium.deadline ? std::max<int64_t>(0,aquarium.deadline-now/1000) : 0);
+      hall_status(reply);
     }
     return "";
   }
@@ -471,6 +576,19 @@ static std::string handle(cJSON *request, int transport, cJSON *reply) {
     last_usb = now;
   else
     last_ble = now;
+  if (op == "hall" && transport == 1) {
+    std::string action=string(request,"action");
+    if(action=="far"||action=="near") {
+      if(!hall_adc)return "ADC unavailable";
+      if(action=="near"&&!hall_far)return "Capture magnet-away baseline first";
+      hall.calibrated=false;
+      hall_capture=action=="far"?1:2;hall_count=hall_sum=hall_max=0;hall_min=4095;
+      if(action=="far")hall_far=0;
+      hall_result="capturing";
+      aquarium.presence(false,false,now/1000);
+    } else if(action!="status")return "Unknown Hall calibration action";
+    hall_status(reply);return "";
+  }
   if (op == "network" && transport == 1) {
     return network_configure(string(request, "config"));
   }
@@ -518,6 +636,7 @@ static std::string handle(cJSON *request, int transport, cJSON *reply) {
     if (!error.empty())
       return error;
     cJSON_AddNumberToObject(reply, "version", version);
+    display_state(reply);
     return "";
   }
   return "Unknown operation";
@@ -562,14 +681,17 @@ static bool button(Button &b, int64_t now) {
     if (b.down) {
       b.pressed = now;
       b.held = false;
-    } else if (!b.held && page_count()) {
+    } else if (!b.held && b.gpio == 18) {
+      return aquarium.feed(now/1000);
+    } else if (!b.held && aquarium.mode == tank::Aquarium::Todo && page_count()) {
       page_index =
-          (page_index + page_count() + (b.gpio == 18 ? 1 : -1)) % page_count();
+          (page_index + page_count() - 1) % page_count();
       return true;
     }
   }
   if (b.down && !b.held && b.gpio == 18 && now - b.pressed >= 800000) {
     b.held = true;
+    if(aquarium.mode != tank::Aquarium::Todo)return false;
     key_long_count++;
     page_index = 0;
     return true;
@@ -618,8 +740,21 @@ extern "C" void app_main() {
       active_slot = slot;
     }
   }
+  uint64_t displayed=0;
+  if(nvs_get_u64(settings,"displayed",&displayed)==ESP_OK&&displayed<=version)displayed_version=displayed;
+  int profile[3];size_t profile_size=sizeof(profile);
+  if(nvs_get_blob(settings,"hall",profile,&profile_size)==ESP_OK&&profile_size==sizeof(profile)) {
+    hall.configure(profile[0],profile[1],profile[2]);hall_result=hall.calibrated?"calibrated":"invalid-profile";
+  }
   init_display();
+  aquarium.now=esp_timer_get_time()/1000;
   show();
+  adc_oneshot_unit_init_cfg_t adc_config={};adc_config.unit_id=ADC_UNIT_1;
+  if(adc_oneshot_new_unit(&adc_config,&hall_adc)==ESP_OK) {
+    adc_oneshot_chan_cfg_t channel={};channel.atten=ADC_ATTEN_DB_12;channel.bitwidth=ADC_BITWIDTH_12;
+    if(adc_oneshot_config_channel(hall_adc,ADC_CHANNEL_0,&channel)!=ESP_OK){adc_oneshot_del_unit(hall_adc);hall_adc=nullptr;}
+  }
+  xTaskCreate(hall_reader,"hall_adc",3072,nullptr,4,nullptr);
   gpio_config_t gpio = {};
   gpio.pin_bit_mask = (1ULL << 18) | 1;
   gpio.mode = GPIO_MODE_INPUT;
@@ -635,7 +770,7 @@ extern "C" void app_main() {
   ble_init(device_name.c_str());
   network_start();
   Button key{18}, boot{0};
-  int64_t last_status = 0;
+  int64_t last_status = 0, last_frame = 0;
   for (;;) {
     Message msg;
     if (xQueueReceive(inbox, &msg, pdMS_TO_TICKS(10)))
@@ -653,27 +788,32 @@ extern "C" void app_main() {
         job->sha = active.empty() ? "" : digest(active.data(), active.size());
         job->page = page_index;
         if (job->kind == NetworkJob::Capture) {
-          lv_refr_now(nullptr);
+          if(aquarium.mode==tank::Aquarium::Todo)lv_refr_now(nullptr);
           job->data.assign(screen_bits, screen_bits + rtd::Bytes);
         }
       }
+      job->saved_version=version;
+      job->displayed_version=displayed_version;
+      job->mode=aquarium.name();
       network_complete(job);
     }
     int64_t now = esp_timer_get_time();
+    auto previous_mode=aquarium.mode;
+    hall_sample(now);
     bool changed = button(key, now);
     changed = button(boot, now) || changed;
-    if (changed)
-      show();
-    else if (auto_pager.advance(page_index, page_count(), now,
-                                pairing.load() != 0 || key.raw || key.down ||
-                                    boot.raw || boot.down))
-      show();
+    bool mode_changed=aquarium.step(now/1000)||previous_mode!=aquarium.mode;
+    if(mode_changed&&aquarium.mode==tank::Aquarium::Todo)page_index=0;
+    if (mode_changed||changed) {show();last_frame=now;}
+    else if (aquarium.mode==tank::Aquarium::Todo) {
+      if(auto_pager.advance(page_index,page_count(),now,pairing.load()!=0||key.raw||key.down||boot.raw||boot.down))show();
+    } else if(now-last_frame>=83333) {show();last_frame=now;}
     if (now - last_status > 500000) {
       status();
       last_status = now;
     }
     if (transfer_transport && now - last_chunk > 15000000)
       reset_transfer();
-    lv_timer_handler();
+    if(aquarium.mode==tank::Aquarium::Todo)lv_timer_handler();
   }
 }

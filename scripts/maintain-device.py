@@ -41,7 +41,7 @@ def fetch(config, path, body=None):
 
 async def main():
     p = argparse.ArgumentParser()
-    p.add_argument("action", choices=["status", "configure", "push"])
+    p.add_argument("action", choices=["status", "configure", "push", "hall"])
     p.add_argument("--transport", choices=["usb", "ble"], default="usb")
     p.add_argument(
         "--network-config",
@@ -51,6 +51,7 @@ async def main():
     p.add_argument(
         "--web-config", type=Path, default=ROOT / "local/assistant-integration/web-config.json"
     )
+    p.add_argument("--hall-action", choices=["status", "far", "near"], default="status")
     a = p.parse_args()
     manager = DeviceManager(Store(ROOT / "local/tasks.sqlite3"))
     found = await (manager.usb() if a.transport == "usb" else manager.ble())
@@ -58,7 +59,18 @@ async def main():
         raise SystemExit("未找到已绑定设备，请检查连接；不要同时运行旧同步服务。")
     link, info = found
     try:
-        if a.action == "configure":
+        if a.action == "hall":
+            if a.transport != "usb":
+                raise SystemExit("霍尔校准只通过已绑定USB进行")
+            result = await link.request("hall", action=a.hall_action)
+            if a.hall_action != "status":
+                for _ in range(60):
+                    await asyncio.sleep(0.1)
+                    result = await link.request("hall", action="status")
+                    if result["hall"]["result"] != "capturing":
+                        break
+            print(json.dumps(result["hall"], ensure_ascii=False))
+        elif a.action == "configure":
             if a.transport != "usb":
                 raise SystemExit("网络配置只允许已绑定 USB")
             config = json.loads(a.network_config.read_text())
@@ -73,12 +85,14 @@ async def main():
             raw = await asyncio.to_thread(fetch, config, "device/snapshots/" + str(pub["version"]))
             if hashlib.sha256(raw).hexdigest() != pub["sha256"]:
                 raise SystemExit("快照校验失败")
-            await link.send_snapshot({"version": pub["version"], "payload": raw})
+            ack = await link.send_snapshot({"version": pub["version"], "payload": raw})
             device = json.loads(a.network_config.read_text())
             await asyncio.to_thread(
-                fetch, device, "device/ack", {"version": pub["version"], "sha256": pub["sha256"]}
+                fetch, device, "device/ack", {"version": pub["version"], "sha256": pub["sha256"],
+                 **{k: ack[k] for k in ("saved_version", "displayed_version", "mode") if k in ack}}
             )
-            print("设备已保存并显示服务端最近发布版本。")
+            print("设备已同步，待喂鱼查看。" if ack.get("mode") and ack.get("displayed_version", 0) < pub["version"]
+                  else "服务端最近发布版本已在待办模式展示。")
         else:
             print(
                 json.dumps(
@@ -86,6 +100,10 @@ async def main():
                         k: info.get(k)
                         for k in (
                             "version",
+                            "saved_version",
+                            "displayed_version",
+                            "mode",
+                            "hall",
                             "pages",
                             "page",
                             "wifi",

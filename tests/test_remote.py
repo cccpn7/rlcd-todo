@@ -261,3 +261,44 @@ def test_deferred_notification_is_durable_and_once(tmp_path):
     assert count.read_text() == "x"
     newer = store.web_publish(0)
     assert newer > version and store.publication_phase(version) == "updated"
+
+
+def test_aquarium_saved_is_not_displayed_and_poll_preserves_the_distinction(app):
+    c = TestClient(app)
+    p = proposal(c)
+    v = c.post(f"/api/v1/proposals/{p['id']}/confirm", headers=headers()).json()["version"]
+    digest = app.state.store.publication(v)["sha"]
+    ack = {"version": v, "sha256": digest, "saved_version": v, "displayed_version": 0, "mode": "aquarium"}
+    assert c.post("/api/v1/device/ack", headers=headers("d"), json=ack).status_code == 200
+    assert app.state.store.publication_phase(v) == "synced"
+    assert not app.state.store.metadata("displayed:" + str(v))
+    assert c.get(f"/api/v1/device/updates?wait=0&version={v}&digest={digest}&mode=feeding&displayed_version=0", headers=headers("d")).status_code == 204
+    state = c.get("/api/v1/state", headers=headers()).json()["device"]
+    assert state["phase"] == "synced" and state["mode"] == "feeding"
+    ack.update(mode="todo", displayed_version=v)
+    assert c.post("/api/v1/device/ack", headers=headers("d"), json=ack).status_code == 200
+    assert app.state.store.publication_phase(v) == "updated"
+    # Historical display remains true after returning to aquarium.
+    c.get(f"/api/v1/device/updates?wait=0&version={v}&digest={digest}&mode=aquarium&displayed_version={v}", headers=headers("d"))
+    state = c.get("/api/v1/state", headers=headers()).json()["device"]
+    assert state["phase"] == "updated" and state["mode"] == "aquarium"
+
+
+def test_modern_ack_validation_and_older_ack_cannot_regress_saved_version(app):
+    store = app.state.store
+    p = store.propose(0, [{"op": "upsert", "text": "演示", "category": "misc"}], "one")
+    old = store.confirm(p["id"], lambda p: {"hash": p["hash"]})
+    old_sha = store.publication(old)["sha"]
+    newer = store.web_publish(store.state()["revision"])
+    digest = store.publication(newer)["sha"]
+    for fields in [dict(saved_version=newer, displayed_version=newer+1, mode="todo"),
+                   dict(saved_version=old, displayed_version=0, mode="aquarium"),
+                   dict(saved_version=newer, displayed_version=0, mode="unknown"),
+                   dict(saved_version=newer, displayed_version=0)]:
+        with pytest.raises(ValueError):
+            store.ack(newer, digest, **fields)
+    store.ack(newer, digest, saved_version=newer, displayed_version=old, mode="aquarium")
+    store.ack(old, old_sha)
+    assert store.metadata("device_ack")["saved_version"] == newer
+    assert store.publication_phase(newer) == "synced"
+    assert store.publication_phase(old) == "updated"
