@@ -1,50 +1,51 @@
-# RLCD Todo · 桌面待办纸
+# 斑鱼 · 桌面待办鱼缸
 
-基于 Waveshare ESP32-S3-RLCD-4.2 的个人桌面待办展示器。竖屏显示今日重点、零散事项和待回收反馈，让下一步行动保持可见。
+**把待办养成鱼，钓一件事来做。**
 
-## 当前状态
+放在显示器旁的一只黑白像素小鱼缸。平时，小鱼在水草间游来游去；想开始做事时，把磁铁鱼竿靠近屏幕，等鱼咬钩再提起，就抽到了一件待办。
 
-**产品规划与项目骨架已整理；待办功能尚未实现，未烧录新固件。**
+钓到的鱼住进右上角的鱼护，旁边的小牌子写着你正在做的事。在网页或个人助手“大圣”里完成并发布后，这条鱼就会消失。想把它放回去？喂一次鱼，它会游回池子，牌子也恢复初始状态，任务留着下次再钓。
 
-已验证 ESP-IDF v5.5.2 环境、设备 USB 通信，以及固定 LVGL 9.4.0 的官方屏幕示例编译。示例固件为 1,211,952 字节；这是官方示例的结果，不代表待办应用或竖屏真机效果已验证。
+## 怎么玩
 
-## 产品方向
-
-- 300×400 黑白竖屏，桌面插电使用。
-- 今日重点按优先顺序展示，另有零散事项与待回收反馈；每类可翻多页。
-- 第一版由手机／电脑网页管理，Mac 本地服务保存数据，设备通过 Wi-Fi 获取。
-- 设备只查看与翻页，完成和编辑在网页进行；未完成事项自动顺延。
-- 后续接入外部助手（大圣）自动整理、推送任务，复用同一接收接口。
-
-## 阅读入口
-
-| 文档 | 用途 |
+| 动作 | 鱼缸里会发生什么 |
 | --- | --- |
-| [产品计划](docs/product-plan.md) | 功能范围、使用流程、人机协作与验收 |
-| [项目规则](AGENTS.md) | Agent 开发约束与工作方式 |
-| [架构与目录](docs/architecture.md) | 模块职责、数据流和扩展位置 |
-| [硬件资料](docs/hardware.md) | 已核对规格、引脚与竖屏注意点 |
-| [开发说明](docs/development.md) | 环境安装、获取示例、编译与验证 |
-| [决策记录](docs/decisions.md) | 已确定的选择和暂缓事项 |
-| [测试范围](tests/README.md) | 后续测试与真机验收边界 |
+| 添加待办并发布 | 每件未完成事项变成一条小鱼 |
+| N极靠近，或短按KEY | 撒下鱼粮；鱼护有鱼时，先把它放回池子 |
+| S极靠近，等咬钩后拿开 | 等概率钓出一件重点或杂项，自动放进鱼护 |
+| 在大圣或网页完成并发布 | 对应任务鱼消失，鱼护空出来 |
+| 长按KEY | 主动查看完整待办清单，再长按回到鱼缸 |
 
-目前可运行的是官方示例的编译入口：按开发说明安装工具链并准备示例，复制 `.env.example` 为 `.env.local` 后运行 `./scripts/build-example.sh`。脚本只编译，不烧录。
+缸里始终有“思、闪、点”3条常驻鱼，它们不对应任务，也不会被钓走。新增的任务鱼有6种黑白像素造型，鱼身不写内容；钓起来才揭晓，一次只留一件正在做的事。
 
-## 目录
+## 清单很简单
 
-```text
-AGENTS.md                 项目协作规则
-docs/                     产品、架构、硬件、开发和决策文档
-firmware/                 待开发的设备固件
-server/                   待开发的 Mac 服务
-server/web/               待开发的手机／电脑网页
-scripts/                  环境与示例编译入口
-tests/                    测试说明，后续加入必要的测试
-local/                    本机记录与数据（忽略，不随克隆创建）
-```
+三份清单：**今日重点、今日杂项、今日追踪**。重点和杂项合并后按每件任务等概率抽取，追踪只展示为鱼、不参与抽取。没有项目层级，也不替你判断优先级。
 
-本机还可以有被忽略的 `vendor/`、`validation`、`logs/`、`docs/sources/`；它们不属于公开源码。
+未完成事项自动保留。钓中不等于完成，喂鱼放回也不删除任务。编辑先保存草稿，明确发布后才更新设备；长文字保留原文并分页显示。
 
-## 来源与许可状态
+## 桌上的设备
 
-硬件与示例来自 [Waveshare 官方项目](https://github.com/waveshareteam/ESP32-S3-RLCD-4.2)。公开仓库当前不包含其完整源码或固件。本项目暂未选择许可证；后续引入第三方代码时保留相应许可声明。
+基于 **Waveshare ESP32-S3-RLCD-4.2**，使用300×400竖向全反射屏，以黑白像素呈现鱼、水草、鱼护和任务牌。SS49E线性霍尔传感器识别磁铁两极，完成喂鱼与钓鱼；按键提供备用操作。
+
+设备通过Wi-Fi／热点独立连接私有待办服务，Mac无需一直开着。断网仍能喂鱼、钓取已缓存的任务；恢复联网后获取最新发布。大圣通过Skill生成候选，收到本人确认后再发布，网页也使用同一份清单。
+
+## 当前进展
+
+钓任务、鱼护、任务牌和喂鱼放回已实现、烧录，并获得使用者的实物效果确认。设备动画实测约11帧／秒，原清单与校准保留。长时间运行、反复磁感应和完整通信恢复测试仍在继续，详细范围见验证记录。
+
+## 代码与开始使用
+
+**当前已验收的实现位于 [`codex/aquarium-prototype`](https://github.com/cccpn7/rlcd-todo/tree/codex/aquarium-prototype) 分支。** `main`目前保留初始项目骨架；请切换到开发分支查看固件、网页、原型与最新文档。
+
+- [完整README与运行入口](https://github.com/cccpn7/rlcd-todo/tree/codex/aquarium-prototype/README.md)
+- [钓任务产品方案](https://github.com/cccpn7/rlcd-todo/tree/codex/aquarium-prototype/docs/task-fishing-product-draft.md)
+- [网页交互原型](https://github.com/cccpn7/rlcd-todo/tree/codex/aquarium-prototype/prototypes/task-fishing)
+- [硬件与接线资料](https://github.com/cccpn7/rlcd-todo/tree/codex/aquarium-prototype/docs/hardware.md)
+- [开发、备份与烧录](https://github.com/cccpn7/rlcd-todo/tree/codex/aquarium-prototype/docs/development.md)
+- [设备直连与服务部署](https://github.com/cccpn7/rlcd-todo/tree/codex/aquarium-prototype/docs/remote-development.md)
+- [验证记录与待测项](https://github.com/cccpn7/rlcd-todo/tree/codex/aquarium-prototype/docs/validation.md)
+
+固件使用ESP-IDF / LVGL，服务使用FastAPI / SQLite，网页使用HTML、CSS和JavaScript。真实任务、网络配置、凭据与设备日志不进入公开仓库。
+
+第三方驱动和字体保留原许可；本项目原创代码暂未选择许可证，详见[第三方说明](https://github.com/cccpn7/rlcd-todo/tree/codex/aquarium-prototype/third_party/README.md)。
