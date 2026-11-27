@@ -6,7 +6,7 @@
 
 沿用 `docs/development.md` 的 ESP-IDF 5.5.2、LVGL 9.4.0 和 Python 环境。运行 `scripts/build-firmware.sh` 时生成单色字库到忽略目录 `local/device-font/`，再复制到构建镜像。源字体仍为 `server/assets/SourceHanSansCN-Regular.otf`，许可见同目录声明。不要手改生成的字库。
 
-字体分区位于 `0x860000`，大小4MiB；原 NVS、应用与双缓存地址保持不变。完整 flash 目标包含字体；只刷应用无法首次启用中文排版。RTD4 原文快照和字体格式 RLF1 固定为版本1。RTD0–3缓存仍可读取；首次接收 RTD4 后拒绝旧图片覆盖。
+字体分区位于 `0x860000`，大小6MiB（钓任务版新增18px字库；旧版4MiB）；原 NVS、应用与双缓存地址保持不变。完整 flash 目标包含字体；只刷应用无法首次启用中文排版。RTD4 原文快照和字体格式 RLF1 固定为版本1。RTD0–3缓存仍可读取；首次接收 RTD4 后拒绝旧图片覆盖。
 
 ## 独立服务
 
@@ -71,6 +71,14 @@ local/venv/bin/python scripts/maintain-device.py hall --hall-action near
 local/venv/bin/python scripts/maintain-device.py hall
 ```
 
-只有结果 `calibrated` 才生效。`insufficient-separation` 表示磁场变化相对噪声不足，应调整位置后重新采集；`sample-error` / `save-error` 须排查输入或存储。上电不会自动重算基准，ADC读数故障禁止触发。移开500ms重新允许、靠近150ms触发；仅喂食期间忽略动作；待办中新的靠近或 KEY 短按会重新喂鱼，吃完重新计时180秒。
+只有结果 `calibrated` 才生效。`insufficient-separation` 表示磁场变化相对噪声不足，应调整位置后重新采集；`sample-error` / `save-error` 须排查输入或存储。上电不会自动重算基准，ADC读数故障禁止触发。移开500ms重新允许、靠近150ms触发；喂食期间新的有效触发追加12颗；当前钓任务版按N极喂鱼、S极钓鱼；N极或KEY喂鱼会放回已有鱼护任务并复位牌子，结束后留在鱼缸。
 
 ADC使用 ESP-IDF 5.5.2 的 [oneshot 驱动](https://docs.espressif.com/projects/esp-idf/en/v5.5.2/esp32s3/api-reference/peripherals/adc_oneshot.html)，独立任务20ms采样，不在中断中调用；缓存写入等主任务停顿后重新观察完整释放与靠近过程。
+
+### 已校准后的灵敏度微调
+
+已绑定 USB 可使用 `hall --hall-action thresholds --hall-trigger <触发偏差> --hall-release <释放偏差>` 设置绝对阈值；两项均为相对已保存基准的 ADC 偏差，数值越小越灵敏。必须已有成功保存的校准，保留原基准；同样参数重复执行不会累积降低。失败的临时两点校准不作为新基准。参数须为整数且满足 `20 <= release < trigger < 4095`、`trigger >= 40`，保存成功后重新等待磁铁释放。先小幅调整并实测，不能把低于实际噪声的磁场变化当成可靠触发；不改变150ms触发和500ms释放防抖。
+
+## 钓任务版维护
+
+参见[实施方案](task-fishing-product-draft.md)。N喂鱼不再打开待办；S下钩、移开提竿；KEY长按主动查看清单。主画面取消日期，网络小图标移到底部。维护hello额外返回 fishing_phase、current_task_id、task_fish、catchable_fish、fishing_state_saved；current_task_id可能关联私人任务，仅存本机日志。服务器仍使用aquarium/feeding/todo兼容状态；牌子不冒充整份清单已展示。首次升级须写入新分区表和字库，后续未改字体才可仅app-flash。现有NVS、缓存起始地址不变。

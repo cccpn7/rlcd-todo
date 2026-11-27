@@ -19,3 +19,7 @@ local/aquarium-test
 
 clang++ -std=c++17 -fsanitize=undefined,bounds -g tests/mono_portrait_test.cpp -o local/mono-portrait-test
 local/mono-portrait-test
+
+# Fishing uses the same native font metrics as the physical plaque.
+clang++ -std=c++17 -fsanitize=undefined,bounds -g tests/task_fishing_test.cpp -o local/task-fishing-test
+local/task-fishing-test local/device-font/font.bin

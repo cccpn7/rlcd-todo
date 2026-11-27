@@ -51,8 +51,13 @@ async def main():
     p.add_argument(
         "--web-config", type=Path, default=ROOT / "local/assistant-integration/web-config.json"
     )
-    p.add_argument("--hall-action", choices=["status", "far", "near"], default="status")
+    p.add_argument("--hall-action", choices=["status", "far", "near", "thresholds"], default="status")
+    p.add_argument("--hall-trigger", type=int)
+    p.add_argument("--hall-release", type=int)
     a = p.parse_args()
+    if a.action == "hall" and a.hall_action == "thresholds":
+        if a.hall_trigger is None or a.hall_release is None or not 20 <= a.hall_release < a.hall_trigger < 4095 or a.hall_trigger < 40:
+            p.error("阈值须满足 20 <= release < trigger < 4095，trigger >= 40")
     manager = DeviceManager(Store(ROOT / "local/tasks.sqlite3"))
     found = await (manager.usb() if a.transport == "usb" else manager.ble())
     if not found:
@@ -62,7 +67,8 @@ async def main():
         if a.action == "hall":
             if a.transport != "usb":
                 raise SystemExit("霍尔校准只通过已绑定USB进行")
-            result = await link.request("hall", action=a.hall_action)
+            fields = {"trigger": a.hall_trigger, "release": a.hall_release} if a.hall_action == "thresholds" else {}
+            result = await link.request("hall", action=a.hall_action, **fields)
             if a.hall_action != "status":
                 for _ in range(60):
                     await asyncio.sleep(0.1)
@@ -91,7 +97,7 @@ async def main():
                 fetch, device, "device/ack", {"version": pub["version"], "sha256": pub["sha256"],
                  **{k: ack[k] for k in ("saved_version", "displayed_version", "mode") if k in ack}}
             )
-            print("设备已同步，待喂鱼查看。" if ack.get("mode") and ack.get("displayed_version", 0) < pub["version"]
+            print("设备已同步；可钓取事项，或长按 KEY 查看清单。" if ack.get("mode") and ack.get("displayed_version", 0) < pub["version"]
                   else "服务端最近发布版本已在待办模式展示。")
         else:
             print(
@@ -104,6 +110,10 @@ async def main():
                             "displayed_version",
                             "mode",
                             "hall",
+                            "fishing_phase",
+                            "current_task_id",
+                            "task_fish",
+                            "catchable_fish",
                             "pages",
                             "page",
                             "wifi",

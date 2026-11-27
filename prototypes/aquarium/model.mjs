@@ -55,17 +55,20 @@ export class Aquarium {
     if (near !== this.near) { this.near = near; this.edgeAt = this.now; }
   }
   feed() {
-    if (this.mode === 'feeding') return false;
+    const append=this.mode==='feeding';
+    this.food=append?this.food.filter(p=>!p.eaten&&!p.expired):[];
+    if(!append){this.eaten=0;this.expired=0;}
+    while(this.food.length>372){this.food.shift().expired=true;this.expired++;}
     this.mode = 'feeding'; this.armed = false; this.feedAt = this.now;
-    this.finishAt = null; this.eaten = 0; this.deadline = 0;
-    this.fish.forEach(f=>{f.target=null;});
-    this.food = Array.from({ length: 24 }, (_, i) => ({
+    this.finishAt = null; this.deadline = 0;
+    if(!append)this.fish.forEach(f=>{f.target=null;});
+    this.food.push(...Array.from({ length: 12 }, (_, i) => ({
       x: 150 + (i * 17 % 55) - 27, originX: 150 + (i * 17 % 55) - 27,
       y: 48,
       size: [8, 4, 10, 6, 7, 5, 9, 4][i % 8], shape: i % 4,
       spread: (i * 29 % 111) - 55, phase: i * 2.4,
       release: this.now + Math.floor(i / 6) * 520 + (i % 6) * 55, eaten: false,
-    }));
+    })));
     return true;
   }
   home() { if (this.mode === 'todo') { this.page = 0; this.pageAt = this.now; } }
@@ -112,28 +115,29 @@ export class Aquarium {
         this.pageAt += Math.floor((this.now - this.pageAt) / 5000) * 5000;
       }
     }
-    if (this.mode !== 'feeding') {
+    {
       if (!this.near && this.now - this.edgeAt >= 500) this.armed = true;
       if (this.near && this.armed && this.now - this.edgeAt >= 150) this.feed();
-    } else { this.armed = false; this.edgeAt = this.now; }
+    }
     if (this.mode === 'todo') return;
     const dt = Math.min(ms, 40) / 1000;
     for (const p of this.food) {
-      if (!p.eaten && this.now >= p.release) {
+      if (!p.eaten && !p.expired && this.now >= p.release) {
         const age=(this.now-p.release)/1000;
         p.x=p.originX+p.spread*(1-Math.exp(-age/0.9))
           +5*(Math.sin(age*2+p.phase)-Math.sin(p.phase));
-        p.y=Math.min(330,48+age*(12+p.size*0.55));
+        p.y=48+age*(12+p.size*0.55);
+        if(p.y>=377){p.expired=true;this.expired=(this.expired||0)+1;}
       }
     }
     this.fish.forEach((f, i) => {
       if(f.biteAt && this.now-f.biteAt<650)return;
       let p=f.target;
       const others=this.fish.filter(other=>other!==f);
-      let waypoint=p&&!p.eaten?route(f,{x:p.x-MOUTH_OFFSET*f.direction,y:p.y},others):null;
+      let waypoint=p&&!p.eaten&&!p.expired?route(f,{x:p.x-MOUTH_OFFSET*f.direction,y:p.y},others):null;
       if(!waypoint){p=null;f.target=null;}
-      if(!p||p.eaten) {
-        const candidates=this.food.filter(c=>!c.eaten&&this.now-c.release>=700&&!others.some(other=>other.target===c))
+      if(!p||p.eaten||p.expired) {
+        const candidates=this.food.filter(c=>!c.eaten&&!c.expired&&this.now-c.release>=700&&!others.some(other=>other.target===c))
           .sort((a,b)=>Math.hypot(a.x-f.x,a.y-f.y)-Math.hypot(b.x-f.x,b.y-f.y));
         for (const candidate of candidates) {
           const preferred=candidate.x>=f.x?1:-1;
@@ -160,12 +164,12 @@ export class Aquarium {
     // Only the mouth eats, and only after contacts have been resolved.
     for(const f of this.fish) {
       const p=f.target;
-      if(!p||p.eaten||(f.biteAt && this.now-f.biteAt<650))continue;
+      if(!p||p.eaten||p.expired||(f.biteAt && this.now-f.biteAt<650))continue;
       if(Math.hypot(p.x-(f.x+MOUTH_OFFSET*f.direction),p.y-f.y)<p.size/2+2) {
         p.eaten=true;this.eaten++;f.biteAt=this.now;f.target=null;
       }
     }
-    if (this.mode === 'feeding' && this.eaten === this.food.length) {
+    if (this.mode === 'feeding' && this.food.every(p=>p.eaten||p.expired)) {
       this.finishAt ??= this.now + 900;
       if (this.now >= this.finishAt) {
         this.mode = 'todo'; this.page = 0; this.pageAt = this.now;

@@ -9,25 +9,38 @@ namespace tank {
 struct Point { float x=0,y=0; };
 inline float distance(Point a,Point b){return std::hypot(a.x-b.x,a.y-b.y);}
 struct Fish : Point { int direction=1,target=-1; float phase=0; int64_t bite=0; };
-struct Food : Point { float origin=0,spread=0,phase=0; int size=0,shape=0; int64_t release=0; bool eaten=false; };
+struct Food : Point { float origin=0,spread=0,phase=0; int size=0,shape=0; int64_t release=0; bool eaten=false,expired=false; };
 class Aquarium {
 public:
  enum Mode { Idle, Feeding, Todo } mode=Idle;
  std::array<Fish,3> fish{};
- std::array<Food,24> food{};
+ static constexpr int Batch=12,Capacity=384;
+ std::array<Food,Capacity> food{};
+ int food_count=0,expired=0;
  int eaten=0;
  int64_t now=0,feed_at=0,finish_at=0,deadline=0;
  bool armed=false;
+ bool return_to_todo=true,collisions=true;
+ float water_y=48;
  int64_t max_presence_gap=0;
  unsigned presence_gaps=0;
  Aquarium(){fish[0].x=77;fish[0].y=125;fish[1].x=215;fish[1].y=208;fish[1].direction=-1;fish[1].phase=2.1;fish[2].x=112;fish[2].y=292;fish[2].phase=4.2;}
  const char *name()const{return mode==Idle?"aquarium":mode==Feeding?"feeding":"todo";}
  bool feed(int64_t at){
-  if(mode==Feeding)return false;
-  now=at;mode=Feeding;armed=false;feed_at=at;finish_at=deadline=0;eaten=0;
+  bool append=mode==Feeding;
+  if(!append){food_count=eaten=expired=0;for(auto &p:food)p={};}
+  now=at;mode=Feeding;armed=false;feed_at=at;finish_at=deadline=0;
   constexpr int sizes[]={8,4,10,6,7,5,9,4};
-  for(int i=0;i<24;i++){auto &p=food[i];p={};p.x=p.origin=150+(i*17%55)-27;p.y=48;p.size=sizes[i%8];p.shape=i%4;p.spread=(i*29%111)-55;p.phase=i*2.4;p.release=at+(i/6)*520+(i%6)*55;}
-  for(auto &f:fish)f.target=-1;
+  for(int i=0;i<Batch;i++){
+   int slot=-1;
+   for(int k=0;k<food_count;k++)if(food[k].eaten||food[k].expired){slot=k;break;}
+   if(slot<0&&food_count<Capacity)slot=food_count++;
+   // Bound memory even during unusually rapid repeated button presses.
+   if(slot<0){slot=0;for(int k=1;k<food_count;k++)if(food[k].release<food[slot].release)slot=k;expired++;}
+   for(auto &f:fish)if(f.target==slot)f.target=-1;
+   auto &p=food[slot];p={};p.x=p.origin=150+(i*17%55)-27;p.y=water_y;p.size=sizes[i%8];p.shape=i%4;p.spread=(i*29%111)-55;p.phase=i*2.4;p.release=at+(i/6)*520+(i%6)*55;
+  }
+  if(!append)for(auto &f:fish)f.target=-1;
   return true;
  }
  // Only a complete physical task refresh starts the three-minute deadline.
@@ -36,7 +49,7 @@ public:
   if(last_presence>=0)max_presence_gap=std::max(max_presence_gap,at-last_presence);
   if(last_presence>=0&&at-last_presence>100){presence_gaps++;armed=false;near_since=away_since=-1;}
   last_presence=at;
-  if(mode==Feeding||!valid){armed=false;near_since=away_since=-1;return;}
+  if(!valid){armed=false;near_since=away_since=-1;return;}
   if(near){away_since=-1;if(near_since<0)near_since=at;if(armed&&at-near_since>=150)feed(at);}
   else{near_since=-1;if(away_since<0)away_since=at;if(at-away_since>=500)armed=true;}
  }
@@ -56,16 +69,16 @@ public:
  bool step(int64_t at){
   auto previous=mode;float dt=std::clamp<int64_t>(at-now,0,40)/1000.f;now=at;
   if(mode==Todo){if(deadline&&at>=deadline)idle(at);else return false;}
-  if(mode==Feeding)for(auto &p:food)if(!p.eaten&&at>=p.release){float age=(at-p.release)/1000.f;p.x=p.origin+p.spread*(1-std::exp(-age/.9f))+5*(std::sin(age*2+p.phase)-std::sin(p.phase));p.y=std::min(330.f,48+age*(12+p.size*.55f));}
+  if(mode==Feeding)for(int k=0;k<food_count;k++)if(auto &p=food[k];!p.eaten&&!p.expired&&at>=p.release){float age=(at-p.release)/1000.f;p.x=p.origin+p.spread*(1-std::exp(-age/.9f))+5*(std::sin(age*2+p.phase)-std::sin(p.phase));p.y=water_y+age*(12+p.size*.55f);if(p.y>=377){p.expired=true;expired++;}}
   for(int i=0;i<3;i++){
    auto &f=fish[i];if(f.bite&&at-f.bite<650)continue;
-   Point waypoint;bool found=f.target>=0&&!food[f.target].eaten&&route(i,{food[f.target].x-26*f.direction,food[f.target].y},waypoint);
+   Point waypoint;bool found=f.target>=0&&!food[f.target].eaten&&!food[f.target].expired&&route(i,{food[f.target].x-26*f.direction,food[f.target].y},waypoint);
    if(!found){
     f.target=-1;
-    std::array<int,24> candidates{};int count=0;
-    if(mode==Feeding)for(int k=0;k<24;k++){
+    std::array<int,Capacity> candidates{};int count=0;
+    if(mode==Feeding)for(int k=0;k<food_count;k++){
      auto &p=food[k];bool claimed=false;for(int j=0;j<3;j++)if(j!=i&&fish[j].target==k)claimed=true;
-     if(!p.eaten&&at-p.release>=700&&!claimed)candidates[count++]=k;
+     if(!p.eaten&&!p.expired&&at-p.release>=700&&!claimed)candidates[count++]=k;
     }
     std::sort(candidates.begin(),candidates.begin()+count,[&](int a,int b){return distance(f,food[a])<distance(f,food[b]);});
     for(int k=0;k<count&&!found;k++){
@@ -76,12 +89,12 @@ public:
    if(found){float d=distance(f,waypoint),move=std::min(d,60*dt);if(d>0){f.x+=(waypoint.x-f.x)/d*move;f.y+=(waypoint.y-f.y)/d*move;}}
    else{f.x+=f.direction*(15+i*3)*dt;f.y+=std::sin(at/1800.f+f.phase)*dt*7;if(f.x>265)f.direction=-1;if(f.x<35)f.direction=1;}
   }
-  separate();
+  if(collisions)separate();else for(auto &f:fish)bound(f);
   if(mode==Feeding){
    for(auto &f:fish)if(f.target>=0&&(!f.bite||at-f.bite>=650)){
-    auto &p=food[f.target];if(!p.eaten&&distance({f.x+26*f.direction,f.y},p)<p.size/2.f+2){p.eaten=true;eaten++;f.bite=at;f.target=-1;}
+    auto &p=food[f.target];if(!p.eaten&&!p.expired&&distance({f.x+26*f.direction,f.y},p)<p.size/2.f+2){p.eaten=true;eaten++;f.bite=at;f.target=-1;}
    }
-   if(eaten==24){if(!finish_at)finish_at=at+900;if(at>=finish_at){mode=Todo;deadline=0;}}
+   if(std::all_of(food.begin(),food.begin()+food_count,[](const Food &p){return p.eaten||p.expired;})){if(!finish_at)finish_at=at+900;if(at>=finish_at){mode=return_to_todo?Todo:Idle;deadline=0;}}
   }
   return previous!=mode;
  }
@@ -92,6 +105,7 @@ private:
  struct Box{float l,r,t,b;bool contains(Point p)const{return p.x>l&&p.x<r&&p.y>t&&p.y<b;}};
  bool route(int index,Point goal,Point &next)const{
   if(!inside(goal))return false;
+  if(!collisions){next=goal;return true;}
   std::array<Box,2> boxes{};int n=0;
   for(int i=0;i<3;i++)if(i!=index)boxes[n++]={fish[i].x-56,fish[i].x+56,fish[i].y-32,fish[i].y+32};
   for(auto b:boxes)if(b.contains(goal))return false;

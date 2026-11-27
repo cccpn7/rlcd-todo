@@ -17,7 +17,7 @@ OUT = ROOT / "local/device-font"
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     cmap = TTFont(SOURCE).getBestCmap()
-    sets = {14: sorted(map(ord, "思闪点")), 12: range(32, 127), 24: sorted(cmap), 26: sorted(map(ord, set("今日重点杂项追踪")))}
+    sets = {14: sorted(map(ord, "思闪点")), 12: sorted(set(range(32, 127)) | set(map(ord,"正在做钓一件事来暂时没有可的项等待咬钩移开提竿未到请重试保存失败长按看清单完整原文翻页任务已同步取消，。"))), 18: sorted(cmap), 24: sorted(cmap), 26: sorted(map(ord, set("今日重点杂项追踪")))}
     records, pixels = [], bytearray()
     for size, chars in sorted(sets.items()):
         font = ImageFont.truetype(str(SOURCE), size)
@@ -42,7 +42,7 @@ def main():
             )
     header = struct.pack("<4sIII", b"RLF1", len(records), 16 + 24 * len(records), len(pixels))
     data = header + b"".join(records) + pixels
-    assert len(data) <= 4 * 1024 * 1024
+    assert len(data) <= 6 * 1024 * 1024
     (OUT / "font.bin").write_bytes(data)
     manifest = {
         "format": 1,

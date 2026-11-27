@@ -6,6 +6,7 @@
 #include "display_bsp.h"
 #include "driver/usb_serial_jtag.h"
 #include "esp_mac.h"
+#include "esp_random.h"
 #include "esp_partition.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -59,6 +60,31 @@ static nvs_handle_t settings;
 static unsigned long key_long_count = 0;
 static tank::Aquarium aquarium;
 static tank::HallFilter hall;
+static tank::Fishing fishing;
+static std::string persisted_task;
+static bool task_storage_dirty=false;
+static bool persist_task(const std::string &id){
+  if(id==persisted_task&&!task_storage_dirty)return true;
+  if(nvs_set_str(settings,"fishing_task",id.c_str())!=ESP_OK||nvs_commit(settings)!=ESP_OK){task_storage_dirty=true;return false;}
+  persisted_task=id;task_storage_dirty=false;return true;
+}
+static unsigned fishing_choice(){
+  uint32_t n=fishing.eligible();if(!n)return 0;
+  // Rejection avoids modulo bias, including populations that do not divide 2^32.
+  uint32_t r,threshold=uint32_t(-n)%n;do{r=esp_random();}while(r<threshold);return r%n;
+}
+static void reconcile_fishing(){
+  fishing.reconcile(text_document.items,esp_timer_get_time()/1000);
+  fishing.prepare_text(text_document,font);
+  persist_task(fishing.current);
+}
+static bool feed_fish(int64_t at){
+  return fishing.feed(aquarium,at,persist_task);
+}
+static bool cast_fish(int64_t at,bool magnetic){
+  aquarium.idle(at);
+  return fishing.cast(at,fishing_choice(),magnetic);
+}
 static adc_oneshot_unit_handle_t hall_adc = nullptr;
 static std::atomic<int> hall_raw{-1};
 static std::atomic<unsigned> hall_sequence{0};
@@ -81,14 +107,16 @@ static void hall_status(cJSON *reply) {
   cJSON_AddBoolToObject(h, "calibrated", hall.calibrated);
   cJSON_AddBoolToObject(h, "valid", hall.valid);
   cJSON_AddBoolToObject(h, "near", hall.near);
-  cJSON_AddBoolToObject(h, "armed", aquarium.armed);
-  cJSON_AddNumberToObject(h, "max_gap_ms", aquarium.max_presence_gap);
-  cJSON_AddNumberToObject(h, "gap_resets", aquarium.presence_gaps);
+  cJSON_AddBoolToObject(h, "armed", fishing.armed);
+  cJSON_AddNumberToObject(h, "max_gap_ms", fishing.max_presence_gap);
+  cJSON_AddNumberToObject(h, "gap_resets", fishing.presence_gaps);
   cJSON_AddNumberToObject(h, "raw", hall.raw);
   cJSON_AddNumberToObject(h, "filtered", hall.filtered);
   cJSON_AddNumberToObject(h, "baseline", hall.baseline);
   cJSON_AddNumberToObject(h, "trigger", hall.trigger);
   cJSON_AddNumberToObject(h, "release", hall.release);
+  cJSON_AddNumberToObject(h,"signed_delta",hall.filtered-hall.baseline);
+  cJSON_AddStringToObject(h,"pole",hall.near?(hall.filtered>hall.baseline?"N":"S"):"away");
   cJSON_AddNumberToObject(h, "samples", hall_count);
   cJSON_AddStringToObject(h, "result", hall_result.c_str());
 }
@@ -96,6 +124,10 @@ static void display_state(cJSON *reply) {
   cJSON_AddNumberToObject(reply, "saved_version", version);
   cJSON_AddNumberToObject(reply, "displayed_version", displayed_version);
   cJSON_AddStringToObject(reply, "mode", aquarium.name());
+  cJSON_AddStringToObject(reply,"fishing_phase",fishing.phase_name());
+  cJSON_AddNumberToObject(reply,"task_fish",fishing.fish.size());
+  cJSON_AddNumberToObject(reply,"catchable_fish",fishing.eligible());
+  cJSON_AddBoolToObject(reply,"fishing_state_saved",persisted_task==fishing.current&&!task_storage_dirty);
 }
 static void hall_sample(int64_t now) {
   static unsigned previous = 0;
@@ -121,8 +153,12 @@ static void hall_sample(int64_t now) {
       }
       hall_capture=0;
     }
-    aquarium.presence(false,false,now/1000);
-  } else aquarium.presence(hall.near,hall.calibrated&&hall.valid,now/1000);
+    fishing.presence(0,false,now/1000,0);
+  } else {
+    fishing.presence(hall.near?(hall.filtered>hall.baseline?1:-1):0,hall.calibrated&&hall.valid,now/1000,fishing_choice());
+    if(fishing.take_feed())feed_fish(now/1000);
+    if(fishing.take_rod()&&fishing.phase!=tank::Fishing::Lift)aquarium.idle(now/1000);
+  }
 }
 
 
@@ -321,11 +357,10 @@ static void status() {
 static void show() {
   if (aquarium.mode != tank::Aquarium::Todo) {
     auto start=esp_timer_get_time();
-    tank::Painter painter(bits);painter.draw(aquarium,font);
+    tank::Painter painter(bits);painter.draw(aquarium,font,&fishing);
     time_t stamp=time(nullptr);tm clock;localtime_r(&stamp,&clock);char text[32];
-    if(stamp>1704067200)strftime(text,sizeof(text),"%m.%d",&clock);else strcpy(text,"--.--");
-    painter.ascii(font,text,178,10);
-    for(int y=0;y<16;y++)for(int x=0;x<40;x++)if(network_pixels[y*40+x]==0)painter.pixel(248+x,10+y);
+    // Keep the top edge free for food and hook; status lives beside the sand.
+    for(int y=0;y<16;y++)for(int x=0;x<40;x++)if(network_pixels[y*40+x]==0)painter.pixel(248+x,382+y);
     if(auto code=pairing.load()){
       painter.rect(50,155,200,85,false);painter.ascii(font,"BLE PIN",101,160,24);
       snprintf(text,sizeof(text),"%06lu",(unsigned long)code);painter.ascii(font,text,108,196,24);
@@ -462,6 +497,7 @@ static std::string accept_snapshot(uint64_t next_version,
   text_document = std::move(doc);
   text_mode = active[3] == '4';
   version = next_version;
+  reconcile_fishing();
   page_index = 0;
   if (aquarium.mode == tank::Aquarium::Todo) show(); // Idle/feeding only persist; never steal the picture.
   return "";
@@ -536,6 +572,7 @@ static std::string handle(cJSON *request, int transport, cJSON *reply) {
     cJSON_AddNumberToObject(reply, "version", version);
     display_state(reply);
     if (authorized) {
+      cJSON_AddStringToObject(reply,"current_task_id",fishing.current.c_str());
       cJSON_AddNumberToObject(reply, "page", page_index);
       cJSON_AddNumberToObject(reply, "uptime_ms", esp_timer_get_time() / 1000);
       cJSON_AddNumberToObject(reply, "pages", page_count());
@@ -552,6 +589,9 @@ static std::string handle(cJSON *request, int transport, cJSON *reply) {
       cJSON_AddNumberToObject(reply, "paint_us", paint_us);
       cJSON_AddNumberToObject(reply, "transfer_us", transfer_us);
       cJSON_AddNumberToObject(reply, "todo_remaining_ms", aquarium.deadline ? std::max<int64_t>(0,aquarium.deadline-now/1000) : 0);
+      cJSON_AddNumberToObject(reply,"food_active",std::count_if(aquarium.food.begin(),aquarium.food.begin()+aquarium.food_count,[](const tank::Food &p){return !p.eaten&&!p.expired;}));
+      cJSON_AddNumberToObject(reply,"food_eaten",aquarium.eaten);
+      cJSON_AddNumberToObject(reply,"food_expired",aquarium.expired);
       hall_status(reply);
     }
     return "";
@@ -585,7 +625,20 @@ static std::string handle(cJSON *request, int transport, cJSON *reply) {
       hall_capture=action=="far"?1:2;hall_count=hall_sum=hall_max=0;hall_min=4095;
       if(action=="far")hall_far=0;
       hall_result="capturing";
-      aquarium.presence(false,false,now/1000);
+      fishing.presence(0,false,now/1000,0);
+    } else if(action=="thresholds") {
+      auto t=cJSON_GetObjectItem(request,"trigger"), r=cJSON_GetObjectItem(request,"release");
+      if(!cJSON_IsNumber(t)||!cJSON_IsNumber(r)||t->valuedouble!=t->valueint||r->valuedouble!=r->valueint||
+         t->valueint<40||t->valueint>=4095||r->valueint<20||r->valueint>=t->valueint)
+        return "Invalid Hall thresholds";
+      int profile[3];size_t size=sizeof(profile);
+      if(nvs_get_blob(settings,"hall",profile,&size)!=ESP_OK||size!=sizeof(profile)||profile[0]<=0||profile[0]>=4095)
+        return "Calibrate Hall sensor first";
+      profile[1]=t->valueint;profile[2]=r->valueint;
+      if(nvs_set_blob(settings,"hall",profile,sizeof(profile))!=ESP_OK||nvs_commit(settings)!=ESP_OK)
+        return "Cannot save Hall thresholds";
+      hall_capture=0;hall.configure(profile[0],profile[1],profile[2]);hall_result="calibrated";
+      fishing.presence(0,false,now/1000,0);
     } else if(action!="status")return "Unknown Hall calibration action";
     hall_status(reply);return "";
   }
@@ -682,18 +735,21 @@ static bool button(Button &b, int64_t now) {
       b.pressed = now;
       b.held = false;
     } else if (!b.held && b.gpio == 18) {
-      return aquarium.feed(now/1000);
+      return feed_fish(now/1000);
     } else if (!b.held && aquarium.mode == tank::Aquarium::Todo && page_count()) {
-      page_index =
-          (page_index + page_count() - 1) % page_count();
-      return true;
+      page_index = (page_index + page_count() - 1) % page_count();return true;
+    } else if(!b.held && b.gpio==0){
+      if(fishing.phase==tank::Fishing::Hook)return fishing.lift(now/1000);
+      if(!fishing.current.empty()){fishing.plaque_page++;return true;}
+      return cast_fish(now/1000,false);
     }
   }
   if (b.down && !b.held && b.gpio == 18 && now - b.pressed >= 800000) {
     b.held = true;
-    if(aquarium.mode != tank::Aquarium::Todo)return false;
-    key_long_count++;
-    page_index = 0;
+    if(fishing.phase!=tank::Fishing::Swim)return false;
+    key_long_count++;page_index=0;
+    if(aquarium.mode==tank::Aquarium::Todo)aquarium.idle(now/1000);
+    else{aquarium.mode=tank::Aquarium::Todo;aquarium.deadline=0;}
     return true;
   }
   return false;
@@ -746,6 +802,10 @@ extern "C" void app_main() {
   if(nvs_get_blob(settings,"hall",profile,&profile_size)==ESP_OK&&profile_size==sizeof(profile)) {
     hall.configure(profile[0],profile[1],profile[2]);hall_result=hall.calibrated?"calibrated":"invalid-profile";
   }
+  char task_id[257];size_t task_length=sizeof(task_id);
+  if(nvs_get_str(settings,"fishing_task",task_id,&task_length)==ESP_OK)fishing.current=persisted_task=task_id;
+  aquarium.return_to_todo=false;aquarium.collisions=false;aquarium.water_y=-6;
+  reconcile_fishing();
   init_display();
   aquarium.now=esp_timer_get_time()/1000;
   show();
@@ -803,6 +863,13 @@ extern "C" void app_main() {
     bool changed = button(key, now);
     changed = button(boot, now) || changed;
     bool mode_changed=aquarium.step(now/1000)||previous_mode!=aquarium.mode;
+    if(aquarium.mode!=tank::Aquarium::Todo)fishing.step(now/1000,aquarium);
+    if(fishing.phase==tank::Fishing::Commit){
+      fishing.committed(persist_task(fishing.candidate),now/1000);
+      fishing.prepare_text(text_document,font);changed=true;
+    }
+    static int64_t persist_retry=0;
+    if((persisted_task!=fishing.current||task_storage_dirty)&&now-persist_retry>1000000){persist_retry=now;persist_task(fishing.current);}
     if(mode_changed&&aquarium.mode==tank::Aquarium::Todo)page_index=0;
     if (mode_changed||changed) {show();last_frame=now;}
     else if (aquarium.mode==tank::Aquarium::Todo) {

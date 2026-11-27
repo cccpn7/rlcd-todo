@@ -89,9 +89,9 @@ function drawTank() {
   for(let i=0;i<6;i++){const x=26+(i*41)%248,y=363-((tank.now/(45+i*8)+i*47)%297);if(i%2){rect(x,y,3,1);rect(x-1,y+1,1,3);rect(x+3,y+1,1,3);rect(x,y+4,3,1);}else rect(x,y,2,2);}
   for(let x=12;x<288;x+=2)rect(x,377+Math.round(Math.sin(x/21)*2),2,1);
   for(let i=0;i<23;i++)rect(18+(i*37)%269,385+(i*17)%9,i%3===0?3:1,1);
-  for(const p of tank.food)if(!p.eaten&&tank.now>=p.release)drawFood(p);
+  for(const p of tank.food)if(!p.eaten&&!p.expired&&tank.now>=p.release)drawFood(p);
   tank.fish.forEach(drawFish);
-  if(tank.mode==='feeding'&&tank.eaten===tank.food.length) text('吃饱啦',129,65,14);
+  if(tank.mode==='feeding'&&tank.food.every(p=>p.eaten||p.expired)) text('看待办',129,65,14);
 }
 const samplePages=[['核对样品反馈','整理下一版方案','确认界面调整'],['归档本周资料'],[]];
 function drawTodo() {
@@ -110,15 +110,15 @@ function draw() {
   const labels={aquarium:'鱼缸 · 自由游动',feeding:'喂食 · 小鱼追食',todo:'待办 · 每页 5 秒'};
   $('mode-label').textContent=labels[tank.mode];
   const left=Math.max(0,Math.ceil((tank.deadline-tank.now)/1000));
-  $('countdown').textContent=tank.mode==='todo'?`${Math.floor(left/60)}:${String(left%60).padStart(2,'0')} 后回鱼缸`:tank.mode==='feeding'?`已吃 ${tank.eaten} / ${tank.food.length}`:'常驻';
+  $('countdown').textContent=tank.mode==='todo'?`${Math.floor(left/60)}:${String(left%60).padStart(2,'0')} 后回鱼缸`:tank.mode==='feeding'?`剩余 ${tank.food.filter(p=>!p.eaten&&!p.expired).length} 颗`:'常驻';
   ['a','b','c'].forEach((s,i)=>$('stage-'+s).classList.toggle('active',['aquarium','feeding','todo'][i]===tank.mode));
   $('bottle').setAttribute('aria-pressed',String(tank.near));
   $('bottle-label').textContent=tank.near?'拿开鱼粮瓶':'靠近鱼粮瓶';
   $('bottle-mark').classList.toggle('present',tank.near);
-  const hint=tank.mode==='todo'?'移开再靠近鱼粮瓶，或短按 KEY，可重新喂鱼；吃完重新展示待办 3 分钟。':tank.mode==='feeding'?'鱼粮落下，小鱼追过去吃；重复靠近不会再撒粮。':tank.near&&!tank.armed?'先拿开瓶子，稍等片刻，再靠近才能喂下一次。':'点击模拟磁铁靠近，再点击拿开。';
+  const hint=tank.mode==='todo'?'移开再靠近鱼粮瓶，或短按 KEY，可重新喂鱼；吃完重新展示待办 3 分钟。':tank.mode==='feeding'?'鱼粮落下，小鱼追过去吃；移开后再次靠近，或短按 KEY，可追加12颗。':tank.near&&!tank.armed?'先拿开瓶子，稍等片刻，再靠近才能喂下一次。':'点击模拟磁铁靠近，再点击拿开。';
   if($('hint').textContent!==hint)$('hint').textContent=hint;
   ['prev','home','last-five'].forEach(id=>$(id).disabled=tank.mode!=='todo');
-  $('next').disabled=tank.mode==='feeding';
+  $('next').disabled=false;
   $('next').textContent='KEY · 喂鱼';
   canvas.setAttribute('aria-label',tank.mode==='todo'?`${labels.todo}，${['今日重点','今日杂项','今日追踪'][tank.page]}，${itemsText()}`:labels[tank.mode]);
 }

@@ -23,16 +23,16 @@ function finishMeal(t) {
     }
   }
   assert.equal(t.mode,'todo','fish finish feeding without getting stuck');
-  assert.ok(t.food.every(p=>p.eaten));
+  assert.ok(t.food.every(p=>p.eaten||p.expired));
 }
 
-test('stable release and approach; slower feeding finishes only after every pellet is eaten',()=>{
+test('stable release and approach; feeding finishes after every pellet is eaten or expires',()=>{
   const t=new Aquarium();t.presence(true);advance(t,2000);assert.equal(t.mode,'aquarium');
   t.presence(false);advance(t,500);t.presence(true);advance(t,140);assert.equal(t.mode,'aquarium');
   advance(t,20);const start=t.now;
   finishMeal(t);
-  assert.equal(t.mode,'todo');assert.equal(t.eaten,t.food.length);assert.ok(t.food.every(p=>p.eaten));
-  assert.ok(t.now-start>=10000);
+  assert.equal(t.mode,'todo');assert.equal(t.eaten+(t.expired||0),t.food.length);assert.ok(t.food.every(p=>p.eaten||p.expired));
+  assert.ok(t.now-start>=1000);
 });
 test('viewing lasts exactly 180 seconds; manual paging does not extend it',()=>{
   const t=new Aquarium();feed(t);finishMeal(t);const deadline=t.deadline;
@@ -52,7 +52,7 @@ test('all three pages cycle at five seconds, including the empty category',()=>{
 test('thirty starting arrangements finish feeding without overlap or escape',()=>{
   for(let trial=0;trial<30;trial++){
     const t=new Aquarium();advance(t,trial*997);feed(t);finishMeal(t);
-    assert.equal(t.mode,'todo');assert.equal(t.eaten,t.food.length);
+    assert.equal(t.mode,'todo');assert.equal(t.eaten+(t.expired||0),t.food.length);
     assert.ok(t.fish.every(f=>f.x>=0&&f.x<300&&f.y>=0&&f.y<400));
   }
 });
@@ -70,8 +70,20 @@ test('Todo accepts a fresh magnet approach or KEY and restarts viewing after the
     if(key)assert.equal(t.feed(),true);
     else{t.presence(false);advance(t,500);t.presence(true);advance(t,160);}
     assert.equal(t.mode,'feeding');assert.equal(t.deadline,0);assert.equal(t.eaten,0);
-    const at=t.feedAt;assert.equal(t.feed(),false);assert.equal(t.feedAt,at);
+    assert.equal(t.feed(),true);assert.equal(t.food.length,24);
     finishMeal(t);assert.equal(t.deadline,t.now+180000);assert.ok(t.deadline>oldDeadline);
     advance(t,1000);assert.equal(t.mode,'todo');
   }
+});
+
+test('feeding adds twelve pellets, preserves previous food and expires missed food at bottom',()=>{
+ const t=new Aquarium();t.feed();assert.equal(t.food.length,12);const first=t.food[0];
+ advance(t,100);t.feed();assert.equal(t.food.length,24);assert.equal(t.food[0],first);
+ for(const f of t.fish)f.biteAt=100000;
+ advance(t,30000);assert.equal(t.eaten,0);assert.equal(t.expired,24);assert.equal(t.mode,'todo');
+});
+
+test('rapid repeated feeding stays bounded and keeps the new batch',()=>{
+ const t=new Aquarium();for(let i=0;i<40;i++)t.feed();
+ assert.equal(t.food.length,384);assert.equal(t.expired,96);
 });

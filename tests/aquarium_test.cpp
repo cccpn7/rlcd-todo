@@ -11,7 +11,7 @@ int main(){
   sense(a,false,t+520,t+1020);sense(a,true,t+1040,t+1180);assert(a.mode==tank::Aquarium::Idle);a.presence(true,true,t+1200);assert(a.mode==tank::Aquarium::Feeding);
   t+=1200;auto start=t;int64_t bites[3]={};
   while(a.mode==tank::Aquarium::Feeding&&t-start<45000){t+=20;a.step(t);bodies(a);for(int i=0;i<3;i++){auto f=a.fish[i];if(f.bite==t){if(bites[i])assert(t-bites[i]>=650);bites[i]=t;bool contact=false;for(auto p:a.food)if(p.eaten&&tank::distance({f.x+26*f.direction,f.y},p)<p.size/2.f+2)contact=true;assert(contact);}}}
-  assert(a.mode==tank::Aquarium::Todo&&a.eaten==24);longest=std::max(longest,t-start);
+  assert(a.mode==tank::Aquarium::Todo&&a.eaten+a.expired==12);longest=std::max(longest,t-start);
   assert(a.deadline==0);a.shown(t+100);auto deadline=a.deadline;a.shown(t+400);assert(a.deadline==deadline);
   a.presence(false,true,t+500);a.presence(true,true,t+1000);assert(a.mode==tank::Aquarium::Todo);
   a.step(deadline-1);assert(a.mode==tank::Aquarium::Todo);a.step(deadline);assert(a.mode==tank::Aquarium::Idle);
@@ -28,9 +28,9 @@ int main(){
   if(button){assert(a.feed(t));}
   else{sense(a,false,t,t+500);sense(a,true,t+520,t+680);t+=680;}
   assert(a.mode==tank::Aquarium::Feeding&&a.deadline==0&&a.eaten==0);
-  auto feed_at=a.feed_at;assert(!a.feed(t+20));assert(a.feed_at==feed_at);
+  assert(a.feed(t+20));assert(a.food_count==24);
   while(a.mode==tank::Aquarium::Feeding){t+=20;a.presence(true,true,t);a.step(t);bodies(a);}
-  assert(a.eaten==24&&a.deadline==0);a.shown(t+100);
+  assert(a.eaten+a.expired==24&&a.deadline==0);a.shown(t+100);
   assert(a.deadline==t+100+180000&&a.deadline>old_deadline);
   sense(a,true,t+120,t+1120);assert(a.mode==tank::Aquarium::Todo);
  }
@@ -43,6 +43,25 @@ int main(){
   a.presence(true,true,2200);assert(!a.armed&&a.mode==tank::Aquarium::Todo);
   sense(a,false,2220,2720);sense(a,true,2740,2900);
   assert(a.mode==tank::Aquarium::Feeding);
+ }
+ // Repeated feeding appends without resetting existing pellets; missed food expires.
+ {
+  tank::Aquarium a;a.feed(1000);assert(a.food_count==12);auto release=a.food[0].release;
+  sense(a,false,1020,1520);sense(a,true,1540,1700);assert(a.food_count==24&&a.food[0].release==release);
+  sense(a,true,1720,3000);assert(a.food_count==24);
+  for(auto &f:a.fish)f.bite=100000;
+  a.step(30000);assert(a.expired==24&&a.eaten==0);
+  a.feed(30020);assert(a.finish_at==0);a.step(60000);a.step(60900);
+  assert(a.mode==tank::Aquarium::Todo&&a.expired==36);
+ }
+ {
+  tank::Aquarium a;
+  for(int i=0;i<40;i++)assert(a.feed(1000+i*100));
+  assert(a.food_count==tank::Aquarium::Capacity&&a.expired==96);
+  int fresh=0;for(auto p:a.food)if(p.release>=4900)fresh++;
+  assert(fresh>=12);
+  for(auto &f:a.fish)f.bite=100000;
+  a.step(40000);a.step(40900);assert(a.mode==tank::Aquarium::Todo);
  }
  tank::HallFilter h;h.sample(2000,true);assert(!h.near&&!h.calibrated);h.configure(2000,200,80);
  for(int i=0;i<30;i++)h.sample(2400,true);assert(h.near);
